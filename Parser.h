@@ -38,8 +38,7 @@ public:
 		}
 
 		auto ext = StringUtils::to_lower(path.extension().string());
-		auto it = s_parsers.find(ext);
-		if (it != s_parsers.end()) {
+		if (auto it = s_parsers.find(ext); it != s_parsers.end()) {
 			return it->second(in);
 		}
 
@@ -52,7 +51,8 @@ public:
 			),
 			ext,
 			std::vector<uint8_t>(ext.begin(), ext.end()),
-			"Parsing file");
+			"Parsing file"
+		);
 	}
 
 	static std::unique_ptr<Container> parse_wav(FileInputStream& in) {

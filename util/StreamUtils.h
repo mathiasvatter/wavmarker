@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <bit>
 #include <chrono>
 #include <cstdint>
@@ -155,6 +156,51 @@ namespace StreamUtils {
 		if (s.bad()) {
 			throw ReadError("Stream error occurred while reading all remaining bytes.",
 				in.filename(), start_off, "read_all_remaining_bytes");
+		}
+		return out;
+	}
+
+	static std::string read_remaining_ascii_until_null(FileInputStream& in) {
+		std::istream& s = in.stream();
+		const auto start_off = in.offset();
+
+		auto cur = s.tellg();
+		if (cur != std::istream::pos_type(-1)) {
+			s.seekg(0, std::ios::end);
+			auto end = s.tellg();
+			if (end != std::istream::pos_type(-1) && end >= cur) {
+				const auto remaining = static_cast<size_t>(end - cur);
+				s.seekg(cur);
+
+				std::string out;
+				out.resize(remaining);
+				s.read(out.data(), static_cast<std::streamsize>(remaining));
+				if (!s || s.gcount() != static_cast<std::streamsize>(remaining)) {
+					throw ReadError("Stream error occurred while reading remaining text.",
+						in.filename(), start_off, "read_remaining_ascii_until_null");
+				}
+				if (const auto null_pos = out.find('\0'); null_pos != std::string::npos) {
+					out.resize(null_pos);
+				}
+				return out;
+			}
+			s.clear();
+			s.seekg(cur);
+		}
+
+		std::string out;
+		out.reserve(4096);
+		char c;
+		while (s.get(c)) {
+			if (c == '\0') {
+				while (s.get(c)) {}
+				break;
+			}
+			out.push_back(c);
+		}
+		if (s.bad()) {
+			throw ReadError("Stream error occurred while reading remaining text.",
+				in.filename(), start_off, "read_remaining_ascii_until_null");
 		}
 		return out;
 	}

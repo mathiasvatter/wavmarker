@@ -10,10 +10,6 @@ namespace {
 
 constexpr bool kLittleEndian = false;
 
-std::string read_fourcc(FileInputStream& in) {
-	return StreamUtils::read_ascii(in, 4);
-}
-
 void write_fourcc(FileOutputStream& out, const std::string& id) {
 	if (id.size() != 4) {
 		throw WriteError("Invalid fourcc length for '" + id + "'", out, "Writing fourcc");
@@ -75,7 +71,7 @@ void FormatChunk::write(FileOutputStream& out) const {
 void CuePoint::parse(FileInputStream& in) {
 	id = StreamUtils::read_unsigned32(in, kLittleEndian);
 	position = StreamUtils::read_unsigned32(in, kLittleEndian);
-	data_chunk_id = read_fourcc(in);
+	data_chunk_id = StreamUtils::read_ascii(in, 4);
 	chunk_start = StreamUtils::read_unsigned32(in, kLittleEndian);
 	block_start = StreamUtils::read_unsigned32(in, kLittleEndian);
 	sample_offset = StreamUtils::read_unsigned32(in, kLittleEndian);
@@ -92,9 +88,7 @@ void CuePoint::write(FileOutputStream& out) const {
 
 void Label::parse(FileInputStream& in) {
 	cue_id = StreamUtils::read_unsigned32(in, kLittleEndian);
-	auto bytes = StreamUtils::read_all_remaining_bytes(in);
-	auto end = std::find(bytes.begin(), bytes.end(), 0);
-	text.assign(bytes.begin(), end);
+	text = StreamUtils::read_remaining_ascii_until_null(in);
 }
 
 void Label::write(FileOutputStream& out) const {
@@ -104,7 +98,7 @@ void Label::write(FileOutputStream& out) const {
 }
 
 void ListSubChunk::parse(FileInputStream& in, const std::string& list_type) {
-	id = read_fourcc(in);
+	id = StreamUtils::read_ascii(in, 4);
 	const uint32_t size = StreamUtils::read_unsigned32(in, kLittleEndian);
 	payload = StreamUtils::read_n_bytes(in, size);
 
@@ -142,7 +136,7 @@ void ListChunk::parse(FileInputStream& in) {
 		throw ParseError("LIST chunk is too short.", in, "LIST", "At least 4 bytes");
 	}
 
-	type = read_fourcc(in);
+	type = StreamUtils::read_ascii(in, 4);
 	subchunks.clear();
 	trailing_data.clear();
 
@@ -230,7 +224,7 @@ void SamplerChunk::write(FileOutputStream& out) const {
 }
 
 void Chunk::parse(FileInputStream& in) {
-	id = read_fourcc(in);
+	id = StreamUtils::read_ascii(in, 4);
 	const uint32_t size = StreamUtils::read_unsigned32(in, kLittleEndian);
 	auto payload = StreamUtils::read_n_bytes(in, size);
 
@@ -321,7 +315,7 @@ void Chunk::write(FileOutputStream& out) const {
 void WavFile::parse(FileInputStream& in) {
 	m_chunks.clear();
 
-	m_riff_id = read_fourcc(in);
+	m_riff_id = StreamUtils::read_ascii(in, 4);
 	if (m_riff_id != "RIFF") {
 		throw ParseError("Not a RIFF WAV file.", in, "RIFF Header", "RIFF", m_riff_id);
 	}
@@ -329,7 +323,7 @@ void WavFile::parse(FileInputStream& in) {
 	const uint32_t riff_payload_size = StreamUtils::read_unsigned32(in, kLittleEndian);
 	const uint64_t riff_end_offset = 8ull + riff_payload_size;
 
-	m_wave_id = read_fourcc(in);
+	m_wave_id = StreamUtils::read_ascii(in, 4);
 	if (m_wave_id != "WAVE") {
 		throw ParseError("Not a WAVE file.", in, "RIFF Type", "WAVE", m_wave_id);
 	}
