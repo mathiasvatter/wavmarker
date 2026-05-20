@@ -80,8 +80,30 @@ WavFile& require_wav(Container& container) {
 
 } // namespace
 
+void debug() {
+	auto project_dir = std::filesystem::path(PROJECT_DIR);
+	auto samples_dir = project_dir / "samples";
+
+	std::string file_path;
+	file_path = samples_dir / "Violins1_HarmonicSustain_BleedOrch_1-127_rr1_A4.wav";
+
+	auto container = Parser::parse_file(file_path);
+	auto& wav = require_wav(*container);
+	print_info(wav);
+	Generator::write_file(*container, (project_dir / "out.wav").string());
+
+	std::string output_path = (project_dir / "out.json").string();
+	// Generator::generate_json(*container, output_path);
+
+}
+
 int main(int argc, const char* argv[]) {
 	std::set_terminate(terminate_handler);
+
+#ifndef NDEBUG
+	debug();
+	return 0;
+#endif
 
 	try {
 		if (argc < 2) {
