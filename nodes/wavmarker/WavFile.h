@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -99,13 +100,37 @@ struct SamplerChunk : Reflectable {
 	DECLARE_REFLECTABLE()
 };
 
+struct BextChunk : Reflectable {
+	std::string description;
+	std::string originator;
+	std::string originator_reference;
+	std::string origination_date;
+	std::string origination_time;
+	uint64_t time_reference = 0;
+	uint16_t version = 0;
+	std::vector<uint8_t> umid;
+	uint16_t loudness_value = 0;
+	uint16_t loudness_range = 0;
+	uint16_t max_true_peak_level = 0;
+	uint16_t max_momentary_loudness = 0;
+	uint16_t max_short_term_loudness = 0;
+	std::vector<uint8_t> reserved;
+	std::string coding_history;
+
+	void parse(FileInputStream& in);
+	void write(FileOutputStream& out) const;
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
+	DECLARE_REFLECTABLE()
+};
+
 enum class ChunkKind {
 	Raw,
 	Format,
 	Data,
 	Cue,
 	List,
-	Sampler
+	Sampler,
+	BroadcastExtension
 };
 
 struct Chunk : Reflectable {
@@ -117,9 +142,11 @@ struct Chunk : Reflectable {
 	std::vector<CuePoint> cue_points;
 	ListChunk list;
 	SamplerChunk sampler;
+	BextChunk bext;
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
 
@@ -130,7 +157,8 @@ DEFINE_REFLECTABLE_MEMBERS(ListSubChunk, id, payload, label)
 DEFINE_REFLECTABLE_MEMBERS(ListChunk, type, subchunks, trailing_data)
 DEFINE_REFLECTABLE_MEMBERS(SampleLoop, cue_point_id, type, start, end, fraction, play_count)
 DEFINE_REFLECTABLE_MEMBERS(SamplerChunk, manufacturer, product, sample_period, midi_unity_note, midi_pitch_fraction, smpte_format, smpte_offset, sampler_data, loops, trailing_data)
-DEFINE_REFLECTABLE_MEMBERS(Chunk, id, kind, raw_payload, format, audio_data, cue_points, list, sampler)
+DEFINE_REFLECTABLE_MEMBERS(BextChunk, description, originator, originator_reference, origination_date, origination_time, time_reference, version, umid, loudness_value, loudness_range, max_true_peak_level, max_momentary_loudness, max_short_term_loudness, reserved, coding_history)
+DEFINE_REFLECTABLE_MEMBERS(Chunk, id, kind, raw_payload, format, audio_data, cue_points, list, sampler, bext)
 
 } // namespace WavMarker
 
@@ -142,6 +170,7 @@ class WavFile final : public Container {
 public:
 	void parse(FileInputStream& in) override;
 	void write(FileOutputStream& out) override;
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 
 	[[nodiscard]] const std::string& riff_id() const { return m_riff_id; }
 	[[nodiscard]] const std::string& wave_id() const { return m_wave_id; }

@@ -421,6 +421,14 @@ namespace StreamUtils {
 		return s;
 	}
 
+	static std::string read_fixed_ascii(FileInputStream& in, size_t len, bool trim_spaces = true) {
+		std::string s = read_ascii(in, len);
+		while (!s.empty() && (s.back() == '\0' || (trim_spaces && s.back() == ' '))) {
+			s.pop_back();
+		}
+		return s;
+	}
+
 	static void write_ascii(FileOutputStream& out, const std::string& txt, size_t len, bool reverse = false) {
 		std::string buf(len, '\0');
 		if (!reverse) {

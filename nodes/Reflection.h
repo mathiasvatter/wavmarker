@@ -69,7 +69,7 @@ public:
 		return nullptr; // Oder ein JSONNull-Objekt
 	}
 
-	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const;
+	[[nodiscard]] virtual std::unique_ptr<JSONValue> to_json() const;
 	[[nodiscard]] std::string to_json_string() const;
 
 };
@@ -91,17 +91,17 @@ public: \
 
 // --- in deiner Reflection.h (vor DEFINE_REFLECTABLE_MEMBERS) ---
 
-// 1) Zähle die Anzahl der __VA_ARGS__ (bis 10)
+// 1) Zähle die Anzahl der __VA_ARGS__ (bis 20)
 #define PP_NARG(...) PP_NARG_(__VA_ARGS__, PP_RSEQ())
 #define PP_NARG_(...) PP_ARG_N(__VA_ARGS__)
-#define PP_ARG_N(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,N,...) N
-#define PP_RSEQ() 10,9,8,7,6,5,4,3,2,1,0
+#define PP_ARG_N(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,_17,_18,_19,_20,N,...) N
+#define PP_RSEQ() 20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0
 
 // 2) Hilfs-Token-Concat
 #define PP_CAT(a,b) PP_CAT_I(a,b)
 #define PP_CAT_I(a,b) a##b
 
-// FOR_EACH_N Makros erweitert bis N=10
+// FOR_EACH_N Makros erweitert bis N=20
 #define FOR_EACH_1(WHAT, Class, X1) WHAT(Class, X1)
 #define FOR_EACH_2(WHAT, Class, X1, X2) WHAT(Class, X1); WHAT(Class, X2)
 #define FOR_EACH_3(WHAT, Class, X1, X2, X3) WHAT(Class, X1); WHAT(Class, X2); WHAT(Class, X3)
@@ -112,6 +112,16 @@ public: \
 #define FOR_EACH_8(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8) WHAT(Class, X1); WHAT(Class, X2); WHAT(Class, X3); WHAT(Class, X4); WHAT(Class, X5); WHAT(Class, X6); WHAT(Class, X7); WHAT(Class, X8)
 #define FOR_EACH_9(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9) WHAT(Class, X1); WHAT(Class, X2); WHAT(Class, X3); WHAT(Class, X4); WHAT(Class, X5); WHAT(Class, X6); WHAT(Class, X7); WHAT(Class, X8); WHAT(Class, X9)
 #define FOR_EACH_10(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10) WHAT(Class, X1); WHAT(Class, X2); WHAT(Class, X3); WHAT(Class, X4); WHAT(Class, X5); WHAT(Class, X6); WHAT(Class, X7); WHAT(Class, X8); WHAT(Class, X9); WHAT(Class, X10)
+#define FOR_EACH_11(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11) FOR_EACH_10(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10); WHAT(Class, X11)
+#define FOR_EACH_12(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12) FOR_EACH_11(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11); WHAT(Class, X12)
+#define FOR_EACH_13(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13) FOR_EACH_12(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12); WHAT(Class, X13)
+#define FOR_EACH_14(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14) FOR_EACH_13(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13); WHAT(Class, X14)
+#define FOR_EACH_15(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15) FOR_EACH_14(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14); WHAT(Class, X15)
+#define FOR_EACH_16(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16) FOR_EACH_15(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15); WHAT(Class, X16)
+#define FOR_EACH_17(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17) FOR_EACH_16(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16); WHAT(Class, X17)
+#define FOR_EACH_18(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18) FOR_EACH_17(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17); WHAT(Class, X18)
+#define FOR_EACH_19(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19) FOR_EACH_18(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18); WHAT(Class, X19)
+#define FOR_EACH_20(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19, X20) FOR_EACH_19(WHAT, Class, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19); WHAT(Class, X20)
 // Bei Bedarf können hier weitere FOR_EACH_N Makros hinzugefügt werden.
 
 // 4) Allgemeines FOR_EACH, wählt automatisch FOR_EACH_n
@@ -169,15 +179,10 @@ std::unique_ptr<JSONValue> convert_to_json(const T& value) {
 	} else if constexpr (std::is_enum_v<T>) {
 		return std::make_unique<JSONInt>(static_cast<long long>(value));
 	} else if constexpr (std::is_base_of_v<Reflectable, T>) {
-		auto json_object = std::make_unique<JSONObject>();
-		for (const auto& [name, descriptor] : value.get_member_descriptors()) {
-			auto json_value = descriptor.getter(&value);
-			json_object->add(name, json_value ? std::move(json_value) : std::make_unique<JSONNull>());
-		}
-		return json_object;
+		return value.to_json();
 	} else {
 		std::cerr << "Warnung: Keine spezifische convert_to_json für Typ " << typeid(T).name() << std::endl;
-		return std::make_unique<JSONNull>();
+		return nullptr;
 	}
 }
 
@@ -185,7 +190,9 @@ inline std::unique_ptr<JSONValue> Reflectable::to_json() const {
 	auto json_object = std::make_unique<JSONObject>();
 	for (const auto& [name, descriptor] : get_member_descriptors()) {
 		auto json_value = descriptor.getter(this);
-		json_object->add(name, json_value ? std::move(json_value) : std::make_unique<JSONNull>());
+		if (json_value) {
+			json_object->add(name, std::move(json_value));
+		}
 	}
 	return json_object;
 }
@@ -206,7 +213,7 @@ std::unique_ptr<JSONValue> convert_to_json(const std::vector<T>& vec) {
 template<typename T>
 std::unique_ptr<JSONValue> convert_to_json(const std::optional<T>& value) {
 	if (!value) {
-		return std::make_unique<JSONNull>();
+		return nullptr;
 	}
 	return convert_to_json(*value);
 }

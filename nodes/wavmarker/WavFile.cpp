@@ -44,6 +44,45 @@ std::vector<uint8_t> write_to_bytes(const auto& value, FileOutputStream& parent_
 
 namespace WavMarker {
 
+namespace {
+
+std::string chunk_kind_name(const ChunkKind kind) {
+	switch (kind) {
+		case ChunkKind::Raw:
+			return "raw";
+		case ChunkKind::Format:
+			return "format";
+		case ChunkKind::Data:
+			return "data";
+		case ChunkKind::Cue:
+			return "cue";
+		case ChunkKind::List:
+			return "list";
+		case ChunkKind::Sampler:
+			return "sampler";
+		case ChunkKind::BroadcastExtension:
+			return "broadcast_extension";
+	}
+	return "unknown";
+}
+
+std::unique_ptr<JSONObject> make_chunk_json(const Chunk& chunk) {
+	auto json = std::make_unique<JSONObject>();
+	json->add("id", std::make_unique<JSONString>(chunk.id));
+	json->add("kind", std::make_unique<JSONString>(chunk_kind_name(chunk.kind)));
+	return json;
+}
+
+std::unique_ptr<JSONValue> byte_preview_to_json(const std::vector<uint8_t>& bytes, const size_t max_size = 32) {
+	auto preview = std::make_unique<JSONArray>();
+	for (size_t index = 0; index < std::min(bytes.size(), max_size); ++index) {
+		preview->add(std::make_unique<JSONInt>(bytes[index]));
+	}
+	return preview;
+}
+
+} // namespace
+
 void FormatChunk::parse(FileInputStream& in) {
 	if (remaining_bytes(in) < 16) {
 		throw ParseError("fmt chunk is too short.", in, "fmt ", "At least 16 bytes");
@@ -223,6 +262,84 @@ void SamplerChunk::write(FileOutputStream& out) const {
 	StreamUtils::write_bytes(out, trailing_data);
 }
 
+void BextChunk::parse(FileInputStream& in) {
+	if (remaining_bytes(in) < 602) {
+		throw ParseError("bext chunk is too short.", in, "bext", "At least 602 bytes");
+	}
+
+	description = StreamUtils::read_fixed_ascii(in, 256);
+	originator = StreamUtils::read_fixed_ascii(in, 32);
+	originator_reference = StreamUtils::read_fixed_ascii(in, 32);
+	origination_date = StreamUtils::read_fixed_ascii(in, 10);
+	origination_time = StreamUtils::read_fixed_ascii(in, 8);
+	time_reference = StreamUtils::read_unsigned64(in, kLittleEndian);
+	version = StreamUtils::read_unsigned16(in, kLittleEndian);
+	umid = StreamUtils::read_n_bytes(in, 64);
+	loudness_value = StreamUtils::read_unsigned16(in, kLittleEndian);
+	loudness_range = StreamUtils::read_unsigned16(in, kLittleEndian);
+	max_true_peak_level = StreamUtils::read_unsigned16(in, kLittleEndian);
+	max_momentary_loudness = StreamUtils::read_unsigned16(in, kLittleEndian);
+	max_short_term_loudness = StreamUtils::read_unsigned16(in, kLittleEndian);
+	reserved = StreamUtils::read_n_bytes(in, 180);
+	coding_history = StreamUtils::read_utf8(in);
+}
+
+void BextChunk::write(FileOutputStream& out) const {
+	StreamUtils::write_ascii(out, description, 256);
+	StreamUtils::write_ascii(out, originator, 32);
+	StreamUtils::write_ascii(out, originator_reference, 32);
+	StreamUtils::write_ascii(out, origination_date, 10);
+	StreamUtils::write_ascii(out, origination_time, 8);
+	StreamUtils::write_unsigned64(out, time_reference, kLittleEndian);
+	StreamUtils::write_unsigned16(out, version, kLittleEndian);
+
+	std::vector<uint8_t> fixed_umid = umid;
+	fixed_umid.resize(64);
+	StreamUtils::write_bytes(out, fixed_umid);
+
+	StreamUtils::write_unsigned16(out, loudness_value, kLittleEndian);
+	StreamUtils::write_unsigned16(out, loudness_range, kLittleEndian);
+	StreamUtils::write_unsigned16(out, max_true_peak_level, kLittleEndian);
+	StreamUtils::write_unsigned16(out, max_momentary_loudness, kLittleEndian);
+	StreamUtils::write_unsigned16(out, max_short_term_loudness, kLittleEndian);
+
+	std::vector<uint8_t> fixed_reserved = reserved;
+	fixed_reserved.resize(180);
+	StreamUtils::write_bytes(out, fixed_reserved);
+
+	StreamUtils::write_from(out, coding_history.data(), coding_history.size(), "Writing bext coding history");
+}
+
+std::unique_ptr<JSONValue> BextChunk::to_json() const {
+	auto json = std::make_unique<JSONObject>();
+	json->add("description", std::make_unique<JSONString>(description));
+	json->add("originator", std::make_unique<JSONString>(originator));
+	json->add("originator_reference", std::make_unique<JSONString>(originator_reference));
+	json->add("origination_date", std::make_unique<JSONString>(origination_date));
+	json->add("origination_time", std::make_unique<JSONString>(origination_time));
+	json->add("time_reference", std::make_unique<JSONInt>(static_cast<long long>(time_reference)));
+	json->add("version", std::make_unique<JSONInt>(version));
+
+	if (std::ranges::any_of(umid, [](const uint8_t byte) { return byte != 0; })) {
+		json->add("umid", convert_to_json(umid));
+	}
+	if (loudness_value != 0 || loudness_range != 0 || max_true_peak_level != 0 ||
+		max_momentary_loudness != 0 || max_short_term_loudness != 0) {
+		auto loudness = std::make_unique<JSONObject>();
+		loudness->add("value", std::make_unique<JSONInt>(loudness_value));
+		loudness->add("range", std::make_unique<JSONInt>(loudness_range));
+		loudness->add("max_true_peak_level", std::make_unique<JSONInt>(max_true_peak_level));
+		loudness->add("max_momentary_loudness", std::make_unique<JSONInt>(max_momentary_loudness));
+		loudness->add("max_short_term_loudness", std::make_unique<JSONInt>(max_short_term_loudness));
+		json->add("loudness", std::move(loudness));
+	}
+	if (!coding_history.empty()) {
+		json->add("coding_history", std::make_unique<JSONString>(coding_history));
+	}
+
+	return json;
+}
+
 void Chunk::parse(FileInputStream& in) {
 	id = StreamUtils::read_ascii(in, 4);
 	const uint32_t size = StreamUtils::read_unsigned32(in, kLittleEndian);
@@ -261,6 +378,9 @@ void Chunk::parse(FileInputStream& in) {
 	} else if (id == "smpl") {
 		kind = ChunkKind::Sampler;
 		sampler.parse(payload_stream);
+	} else if (id == "bext") {
+		kind = ChunkKind::BroadcastExtension;
+		bext.parse(payload_stream);
 	} else {
 		kind = ChunkKind::Raw;
 	}
@@ -293,6 +413,9 @@ void Chunk::write(FileOutputStream& out) const {
 		case ChunkKind::Sampler:
 			payload = write_to_bytes(sampler, out);
 			break;
+		case ChunkKind::BroadcastExtension:
+			payload = write_to_bytes(bext, out);
+			break;
 		case ChunkKind::Raw:
 		default:
 			payload = raw_payload;
@@ -308,6 +431,48 @@ void Chunk::write(FileOutputStream& out) const {
 	if ((payload.size() & 1u) != 0u) {
 		out.put('\0');
 	}
+}
+
+std::unique_ptr<JSONValue> Chunk::to_json() const {
+	auto json = make_chunk_json(*this);
+
+	switch (kind) {
+		case ChunkKind::Format:
+			json->add("payload_size", std::make_unique<JSONInt>(static_cast<long long>(16 + format.extra_bytes.size())));
+			json->add("format", format.to_json());
+			break;
+		case ChunkKind::Data:
+			json->add("audio_data_size", std::make_unique<JSONInt>(static_cast<long long>(audio_data.size())));
+			break;
+		case ChunkKind::Cue:
+			json->add("payload_size", std::make_unique<JSONInt>(static_cast<long long>(4 + cue_points.size() * 24)));
+			json->add("cue_points", convert_to_json(cue_points));
+			break;
+		case ChunkKind::List:
+			json->add("list", list.to_json());
+			break;
+		case ChunkKind::Sampler:
+			json->add("payload_size", std::make_unique<JSONInt>(static_cast<long long>(36 + sampler.loops.size() * 24 + sampler.trailing_data.size())));
+			json->add("sampler", sampler.to_json());
+			break;
+		case ChunkKind::BroadcastExtension:
+			json->add("payload_size", std::make_unique<JSONInt>(static_cast<long long>(602 + bext.coding_history.size())));
+			json->add("broadcast_extension", bext.to_json());
+			break;
+		case ChunkKind::Raw:
+		default:
+			json->add("payload_size", std::make_unique<JSONInt>(static_cast<long long>(raw_payload.size())));
+			if (id == "JUNK" || id == "junk") {
+				json->add("kind", std::make_unique<JSONString>("junk"));
+				json->add("purpose", std::make_unique<JSONString>("padding"));
+				json->add("byte_preview", byte_preview_to_json(raw_payload));
+			} else {
+				json->add("raw_payload", convert_to_json(raw_payload));
+			}
+			break;
+	}
+
+	return json;
 }
 
 } // namespace WavMarker
@@ -357,6 +522,20 @@ void WavFile::write(FileOutputStream& out) {
 	write_fourcc(out, m_riff_id);
 	StreamUtils::write_unsigned32(out, static_cast<uint32_t>(bytes.size()), kLittleEndian);
 	StreamUtils::write_bytes(out, bytes);
+}
+
+std::unique_ptr<JSONValue> WavFile::to_json() const {
+	auto json = std::make_unique<JSONObject>();
+	json->add("riff_id", std::make_unique<JSONString>(m_riff_id));
+	json->add("wave_id", std::make_unique<JSONString>(m_wave_id));
+
+	auto chunks = std::make_unique<JSONArray>();
+	for (const auto& chunk : m_chunks) {
+		chunks->add(chunk.to_json());
+	}
+	json->add("chunks", std::move(chunks));
+
+	return json;
 }
 
 const WavMarker::FormatChunk* WavFile::format() const {
