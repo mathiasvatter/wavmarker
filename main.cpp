@@ -93,7 +93,7 @@ void debug() {
 	Generator::write_file(*container, (project_dir / "out.wav").string());
 
 	std::string output_path = (project_dir / "out.json").string();
-	// Generator::generate_json(*container, output_path);
+	Generator::dump_json(wav, output_path);
 
 }
 
@@ -143,7 +143,11 @@ int main(int argc, const char* argv[]) {
 		print_info(wav);
 
 		if (!info_only && !output_path.empty()) {
-			Generator::write_file(wav, output_path);
+			if (std::filesystem::path(output_path).extension() == ".json") {
+				Generator::dump_json(wav, output_path);
+			} else {
+				Generator::write_file(wav, output_path);
+			}
 			std::cout << "Wrote: " << output_path << "\n";
 		}
 

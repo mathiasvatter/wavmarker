@@ -24,6 +24,11 @@ add_executable(wavmarker
         Generator.h
         FileStream.h
         nodes/Container.h
+        nodes/Reflection.h
+        nodes/JSON/ast/JSONValue.cpp
+        nodes/JSON/ast/JSONValue.h
+        nodes/JSON/visitor/JSONPrintVisitor.h
+        nodes/JSON/visitor/JSONVisitor.h
         nodes/wavmarker/WavFile.cpp
         nodes/wavmarker/WavFile.h
         util/Error.cpp

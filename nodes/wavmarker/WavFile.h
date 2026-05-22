@@ -6,13 +6,14 @@
 #include <vector>
 
 #include "nodes/Container.h"
+#include "nodes/Reflection.h"
 
 class FileInputStream;
 class FileOutputStream;
 
 namespace WavMarker {
 
-struct FormatChunk {
+struct FormatChunk : Reflectable {
 	uint16_t audio_format = 0;
 	uint16_t channels = 0;
 	uint32_t sample_rate = 0;
@@ -23,9 +24,10 @@ struct FormatChunk {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
 
-struct CuePoint {
+struct CuePoint : Reflectable {
 	uint32_t id = 0;
 	uint32_t position = 0;
 	std::string data_chunk_id = "data";
@@ -35,35 +37,39 @@ struct CuePoint {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
 
-struct Label {
+struct Label : Reflectable {
 	uint32_t cue_id = 0;
 	std::string text;
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
 
-struct ListSubChunk {
+struct ListSubChunk : Reflectable {
 	std::string id;
 	std::vector<uint8_t> payload;
 	std::optional<Label> label;
 
 	void parse(FileInputStream& in, const std::string& list_type);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
 
-struct ListChunk {
+struct ListChunk : Reflectable {
 	std::string type;
 	std::vector<ListSubChunk> subchunks;
 	std::vector<uint8_t> trailing_data;
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
 
-struct SampleLoop {
+struct SampleLoop : Reflectable {
 	uint32_t cue_point_id = 0;
 	uint32_t type = 0;
 	uint32_t start = 0;
@@ -73,9 +79,10 @@ struct SampleLoop {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
 
-struct SamplerChunk {
+struct SamplerChunk : Reflectable {
 	uint32_t manufacturer = 0;
 	uint32_t product = 0;
 	uint32_t sample_period = 0;
@@ -89,6 +96,7 @@ struct SamplerChunk {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
 
 enum class ChunkKind {
@@ -100,7 +108,7 @@ enum class ChunkKind {
 	Sampler
 };
 
-struct Chunk {
+struct Chunk : Reflectable {
 	std::string id;
 	ChunkKind kind = ChunkKind::Raw;
 	std::vector<uint8_t> raw_payload;
@@ -112,7 +120,17 @@ struct Chunk {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	DECLARE_REFLECTABLE()
 };
+
+DEFINE_REFLECTABLE_MEMBERS(FormatChunk, audio_format, channels, sample_rate, byte_rate, block_align, bits_per_sample, extra_bytes)
+DEFINE_REFLECTABLE_MEMBERS(CuePoint, id, position, data_chunk_id, chunk_start, block_start, sample_offset)
+DEFINE_REFLECTABLE_MEMBERS(Label, cue_id, text)
+DEFINE_REFLECTABLE_MEMBERS(ListSubChunk, id, payload, label)
+DEFINE_REFLECTABLE_MEMBERS(ListChunk, type, subchunks, trailing_data)
+DEFINE_REFLECTABLE_MEMBERS(SampleLoop, cue_point_id, type, start, end, fraction, play_count)
+DEFINE_REFLECTABLE_MEMBERS(SamplerChunk, manufacturer, product, sample_period, midi_unity_note, midi_pitch_fraction, smpte_format, smpte_offset, sampler_data, loops, trailing_data)
+DEFINE_REFLECTABLE_MEMBERS(Chunk, id, kind, raw_payload, format, audio_data, cue_points, list, sampler)
 
 } // namespace WavMarker
 
@@ -135,4 +153,7 @@ public:
 	[[nodiscard]] std::vector<WavMarker::Label> labels() const;
 	[[nodiscard]] std::vector<WavMarker::SampleLoop> sample_loops() const;
 	[[nodiscard]] const std::vector<uint8_t>* audio_data() const;
+	DECLARE_REFLECTABLE()
 };
+
+DEFINE_REFLECTABLE_MEMBERS(WavFile, m_riff_id, m_wave_id, m_chunks)
