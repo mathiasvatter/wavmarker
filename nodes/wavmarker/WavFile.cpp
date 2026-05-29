@@ -350,6 +350,7 @@ void Chunk::parse(FileInputStream& in) {
 			cue_point.parse(payload_stream);
 			cue_points.push_back(std::move(cue_point));
 		}
+		rebuild_cue_point_map();
 	} else if (id == get_chunk_kind_id(ChunkKind::List)) {
 		kind = ChunkKind::List;
 		list.parse(payload_stream);
@@ -556,6 +557,108 @@ std::vector<SampleLoop> WavFile::sample_loops() const {
 		}
 	}
 	return out;
+}
+
+WavFile::SampleLoopCueReferences WavFile::validate_sample_loop_cues() const {
+	SampleLoopCueReferences references;
+
+	references.sampler_chunk = find_chunk(ChunkKind::Sampler);
+	if (!references.sampler_chunk || references.sampler_chunk->sampler.loops.empty()) {
+		throw RuntimeError("Source WAV does not contain sample loops.", "Copying sample loops");
+	}
+
+	references.cue_chunk = find_chunk(ChunkKind::Cue);
+	if (!references.cue_chunk) {
+		throw RuntimeError("Source WAV contains sample loops but no cue chunk.", "Copying sample loops");
+	}
+
+	for (const auto& loop : references.sampler_chunk->sampler.loops) {
+		if (references.cue_ids.insert(loop.cue_point_id).second) {
+			references.cue_ids_in_order.push_back(loop.cue_point_id);
+		}
+	}
+
+	for (const auto source_cue_id : references.cue_ids_in_order) {
+		if (!references.cue_chunk->cue_point_map.contains(source_cue_id)) {
+			throw RuntimeError("Source sample loop references a missing cue point id: " + std::to_string(source_cue_id),
+				"Copying sample loops");
+		}
+	}
+
+	return references;
+}
+
+void WavFile::copy_sample_loops_from(WavFile& source, const bool include_labels) {
+	const auto source_loop_cues = source.validate_sample_loop_cues();
+
+	std::vector<Label> source_labels;
+	if (include_labels) {
+		for (const auto& chunk : source.m_chunks) {
+			if (chunk.kind != ChunkKind::List || chunk.list.type != "adtl") {
+				continue;
+			}
+			for (const auto& subchunk : chunk.list.subchunks) {
+				if (subchunk.id == "labl" && subchunk.label && source_loop_cues.cue_ids.contains(subchunk.label->cue_id)) {
+					source_labels.push_back(*subchunk.label);
+				}
+			}
+		}
+	}
+
+	std::unordered_set<uint32_t> old_target_loop_cue_ids;
+	if (const auto* target_sampler_chunk = this->find_chunk(ChunkKind::Sampler)) {
+		old_target_loop_cue_ids = target_sampler_chunk->sampler.cue_ids_for_loops();
+	}
+
+	if (!old_target_loop_cue_ids.empty()) {
+		if (auto* target_cue_chunk = this->find_chunk(ChunkKind::Cue)) {
+			target_cue_chunk->remove_cues_by_id(old_target_loop_cue_ids);
+		}
+		for (auto& chunk : m_chunks) {
+			if (chunk.kind == ChunkKind::List && chunk.list.type == "adtl") {
+				chunk.list.remove_labels_by_cue_id(old_target_loop_cue_ids);
+			}
+		}
+	}
+
+	std::unordered_map<uint32_t, uint32_t> cue_id_map;
+	uint32_t next_cue_id = this->next_free_cue_id();
+	for (const auto source_cue_id : source_loop_cues.cue_ids_in_order) {
+		if (next_cue_id == 0) {
+			throw RuntimeError("Cue point id overflow while copying sample loops.", "Copying sample loops");
+		}
+		cue_id_map.emplace(source_cue_id, next_cue_id++);
+	}
+
+	auto& target_cue_chunk = this->ensure_chunk(ChunkKind::Cue);
+	for (const auto source_cue_id : source_loop_cues.cue_ids_in_order) {
+		const auto target_cue_id = cue_id_map.at(source_cue_id);
+		auto cue_point = *source_loop_cues.cue_chunk->cue_point_map.at(source_cue_id);
+		cue_point.id = target_cue_id;
+		target_cue_chunk.cue_points.push_back(std::move(cue_point));
+	}
+	target_cue_chunk.rebuild_cue_point_map();
+
+	auto& target_sampler_chunk = this->ensure_chunk(ChunkKind::Sampler);
+	target_sampler_chunk.sampler = source_loop_cues.sampler_chunk->sampler;
+	for (auto& loop : target_sampler_chunk.sampler.loops) {
+		loop.cue_point_id = cue_id_map.at(loop.cue_point_id);
+	}
+
+	if (!include_labels || source_labels.empty()) {
+		return;
+	}
+
+	auto& target_list_chunk = this->ensure_chunk(ChunkKind::List);
+	target_list_chunk.list.type = "adtl";
+	for (auto label : source_labels) {
+		label.cue_id = cue_id_map.at(label.cue_id);
+
+		ListSubChunk subchunk;
+		subchunk.id = "labl";
+		subchunk.label = std::move(label);
+		target_list_chunk.list.subchunks.push_back(std::move(subchunk));
+	}
 }
 
 const std::vector<uint8_t>* WavFile::audio_data() const {

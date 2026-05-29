@@ -1,9 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "nodes/Container.h"
@@ -69,6 +73,12 @@ struct ListChunk : Reflectable {
 	std::vector<ListSubChunk> subchunks;
 	std::vector<uint8_t> trailing_data;
 
+	void remove_labels_by_cue_id(const std::unordered_set<uint32_t>& ids) {
+		std::erase_if(subchunks, [&ids](const ListSubChunk& subchunk) {
+			return subchunk.label && ids.contains(subchunk.label->cue_id);
+		});
+	}
+
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
 	DECLARE_REFLECTABLE()
@@ -100,6 +110,14 @@ struct SamplerChunk : Reflectable {
 	uint32_t sampler_data = 0;
 	std::vector<SampleLoop> loops;
 	std::vector<uint8_t> trailing_data;
+
+	std::unordered_set<uint32_t> cue_ids_for_loops() const {
+		std::unordered_set<uint32_t> ids;
+		for (const auto& loop : loops) {
+			ids.insert(loop.cue_point_id);
+		}
+		return ids;
+	}
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
@@ -138,9 +156,24 @@ struct Chunk : Reflectable {
 	FormatChunk format;
 	std::vector<uint8_t> audio_data;
 	std::vector<CuePoint> cue_points;
+	std::map<uint32_t, CuePoint*> cue_point_map;
 	ListChunk list;
 	SamplerChunk sampler;
 	BextChunk bext;
+
+	void rebuild_cue_point_map() {
+		cue_point_map.clear();
+		for (auto& cue_point : cue_points) {
+			cue_point_map[cue_point.id] = &cue_point;
+		}
+	}
+
+	void remove_cues_by_id(const std::unordered_set<uint32_t>& ids) {
+		std::erase_if(cue_points, [&ids](const CuePoint& cue_point) {
+			return ids.contains(cue_point.id);
+		});
+		rebuild_cue_point_map();
+	}
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
@@ -151,9 +184,18 @@ DEFINE_REFLECTABLE_MEMBERS(Chunk, id, kind, raw_payload, format, audio_data, cue
 
 
 class WavFile final : public Container {
+	struct SampleLoopCueReferences {
+		const Chunk* sampler_chunk = nullptr;
+		const Chunk* cue_chunk = nullptr;
+		std::vector<uint32_t> cue_ids_in_order;
+		std::unordered_set<uint32_t> cue_ids;
+	};
+
 	std::string m_riff_id = "RIFF";
 	std::string m_wave_id = "WAVE";
 	std::vector<Chunk> m_chunks;
+
+	[[nodiscard]] SampleLoopCueReferences validate_sample_loop_cues() const;
 
 public:
 	void parse(FileInputStream& in) override;
@@ -169,17 +211,47 @@ public:
 	[[nodiscard]] std::vector<Label> labels() const;
 	[[nodiscard]] std::vector<SampleLoop> sample_loops() const;
 	[[nodiscard]] const std::vector<uint8_t>* audio_data() const;
+	void copy_sample_loops_from(WavFile& source, bool include_labels = true);
 
-	[[nodiscard]] const Chunk& chunk(const ChunkKind &kind) const {
+	Chunk* find_chunk(const ChunkKind kind) noexcept {
+		const auto it = std::ranges::find_if(m_chunks, [kind](const Chunk& chunk) {
+			return chunk.kind == kind;
+		});
+		return it == m_chunks.end() ? nullptr : &*it;
+	}
+
+	[[nodiscard]] const Chunk* find_chunk(const ChunkKind kind) const noexcept {
+		const auto it = std::ranges::find_if(m_chunks, [kind](const Chunk& chunk) {
+			return chunk.kind == kind;
+		});
+		return it == m_chunks.end() ? nullptr : &*it;
+	}
+
+	/// returns chunk, tries to find it, if not, creates it
+	Chunk& ensure_chunk(const ChunkKind kind) noexcept {
+		if (auto* chunk = find_chunk(kind)) {
+			return *chunk;
+		}
+
+		Chunk chunk;
+		chunk.kind = kind;
+		chunk.id = get_chunk_kind_id(kind);
+		m_chunks.push_back(std::move(chunk));
+		return m_chunks.back();
+	}
+
+	[[nodiscard]] uint32_t next_free_cue_id() const {
+		uint32_t max_id = 0;
 		for (const auto& chunk : m_chunks) {
-			if (chunk.kind == kind) {
-				return chunk;
+			if (chunk.kind != ChunkKind::Cue) continue;
+			for (const auto& cue_point : chunk.cue_points) {
+				max_id = std::max(max_id, cue_point.id);
 			}
 		}
-		throw ParseError(
-			"Requested chunk kind not found in WAV file: " + get_chunk_kind_string(kind),
-			"get_chunk"
-		);
+		if (max_id == std::numeric_limits<uint32_t>::max()) {
+			throw RuntimeError("No free cue point ids left.", "Copying sample loops");
+		}
+		return max_id + 1;
 	}
 
 	DECLARE_REFLECTABLE()
