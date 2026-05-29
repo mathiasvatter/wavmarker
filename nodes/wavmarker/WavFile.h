@@ -8,11 +8,10 @@
 
 #include "nodes/Container.h"
 #include "nodes/Reflection.h"
+#include "ChunkKind.h"
 
 class FileInputStream;
 class FileOutputStream;
-
-namespace WavMarker {
 
 struct FormatChunk : Reflectable {
 	uint16_t audio_format = 0;
@@ -27,6 +26,7 @@ struct FormatChunk : Reflectable {
 	void write(FileOutputStream& out) const;
 	DECLARE_REFLECTABLE()
 };
+DEFINE_REFLECTABLE_MEMBERS(FormatChunk, audio_format, channels, sample_rate, byte_rate, block_align, bits_per_sample, extra_bytes)
 
 struct CuePoint : Reflectable {
 	uint32_t id = 0;
@@ -40,6 +40,7 @@ struct CuePoint : Reflectable {
 	void write(FileOutputStream& out) const;
 	DECLARE_REFLECTABLE()
 };
+DEFINE_REFLECTABLE_MEMBERS(CuePoint, id, position, data_chunk_id, chunk_start, block_start, sample_offset)
 
 struct Label : Reflectable {
 	uint32_t cue_id = 0;
@@ -49,6 +50,7 @@ struct Label : Reflectable {
 	void write(FileOutputStream& out) const;
 	DECLARE_REFLECTABLE()
 };
+DEFINE_REFLECTABLE_MEMBERS(Label, cue_id, text)
 
 struct ListSubChunk : Reflectable {
 	std::string id;
@@ -57,8 +59,10 @@ struct ListSubChunk : Reflectable {
 
 	void parse(FileInputStream& in, const std::string& list_type);
 	void write(FileOutputStream& out) const;
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
+DEFINE_REFLECTABLE_MEMBERS(ListSubChunk, id, payload, label)
 
 struct ListChunk : Reflectable {
 	std::string type;
@@ -69,6 +73,7 @@ struct ListChunk : Reflectable {
 	void write(FileOutputStream& out) const;
 	DECLARE_REFLECTABLE()
 };
+DEFINE_REFLECTABLE_MEMBERS(ListChunk, type, subchunks, trailing_data)
 
 struct SampleLoop : Reflectable {
 	uint32_t cue_point_id = 0;
@@ -82,6 +87,7 @@ struct SampleLoop : Reflectable {
 	void write(FileOutputStream& out) const;
 	DECLARE_REFLECTABLE()
 };
+DEFINE_REFLECTABLE_MEMBERS(SampleLoop, cue_point_id, type, start, end, fraction, play_count)
 
 struct SamplerChunk : Reflectable {
 	uint32_t manufacturer = 0;
@@ -99,6 +105,7 @@ struct SamplerChunk : Reflectable {
 	void write(FileOutputStream& out) const;
 	DECLARE_REFLECTABLE()
 };
+DEFINE_REFLECTABLE_MEMBERS(SamplerChunk, manufacturer, product, sample_period, midi_unity_note, midi_pitch_fraction, smpte_format, smpte_offset, sampler_data, loops, trailing_data)
 
 struct BextChunk : Reflectable {
 	std::string description;
@@ -122,16 +129,7 @@ struct BextChunk : Reflectable {
 	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
-
-enum class ChunkKind {
-	Raw,
-	Format,
-	Data,
-	Cue,
-	List,
-	Sampler,
-	BroadcastExtension
-};
+DEFINE_REFLECTABLE_MEMBERS(BextChunk, description, originator, originator_reference, origination_date, origination_time, time_reference, version, umid, loudness_value, loudness_range, max_true_peak_level, max_momentary_loudness, max_short_term_loudness, reserved, coding_history)
 
 struct Chunk : Reflectable {
 	std::string id;
@@ -149,23 +147,13 @@ struct Chunk : Reflectable {
 	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
-
-DEFINE_REFLECTABLE_MEMBERS(FormatChunk, audio_format, channels, sample_rate, byte_rate, block_align, bits_per_sample, extra_bytes)
-DEFINE_REFLECTABLE_MEMBERS(CuePoint, id, position, data_chunk_id, chunk_start, block_start, sample_offset)
-DEFINE_REFLECTABLE_MEMBERS(Label, cue_id, text)
-DEFINE_REFLECTABLE_MEMBERS(ListSubChunk, id, payload, label)
-DEFINE_REFLECTABLE_MEMBERS(ListChunk, type, subchunks, trailing_data)
-DEFINE_REFLECTABLE_MEMBERS(SampleLoop, cue_point_id, type, start, end, fraction, play_count)
-DEFINE_REFLECTABLE_MEMBERS(SamplerChunk, manufacturer, product, sample_period, midi_unity_note, midi_pitch_fraction, smpte_format, smpte_offset, sampler_data, loops, trailing_data)
-DEFINE_REFLECTABLE_MEMBERS(BextChunk, description, originator, originator_reference, origination_date, origination_time, time_reference, version, umid, loudness_value, loudness_range, max_true_peak_level, max_momentary_loudness, max_short_term_loudness, reserved, coding_history)
 DEFINE_REFLECTABLE_MEMBERS(Chunk, id, kind, raw_payload, format, audio_data, cue_points, list, sampler, bext)
 
-} // namespace WavMarker
 
 class WavFile final : public Container {
 	std::string m_riff_id = "RIFF";
 	std::string m_wave_id = "WAVE";
-	std::vector<WavMarker::Chunk> m_chunks;
+	std::vector<Chunk> m_chunks;
 
 public:
 	void parse(FileInputStream& in) override;
@@ -174,14 +162,26 @@ public:
 
 	[[nodiscard]] const std::string& riff_id() const { return m_riff_id; }
 	[[nodiscard]] const std::string& wave_id() const { return m_wave_id; }
-	[[nodiscard]] const std::vector<WavMarker::Chunk>& chunks() const { return m_chunks; }
-	[[nodiscard]] std::vector<WavMarker::Chunk>& chunks() { return m_chunks; }
+	[[nodiscard]] const std::vector<Chunk>& chunks() const { return m_chunks; }
 
-	[[nodiscard]] const WavMarker::FormatChunk* format() const;
-	[[nodiscard]] std::vector<WavMarker::CuePoint> cue_points() const;
-	[[nodiscard]] std::vector<WavMarker::Label> labels() const;
-	[[nodiscard]] std::vector<WavMarker::SampleLoop> sample_loops() const;
+	[[nodiscard]] const FormatChunk* format() const;
+	[[nodiscard]] std::vector<CuePoint> cue_points() const;
+	[[nodiscard]] std::vector<Label> labels() const;
+	[[nodiscard]] std::vector<SampleLoop> sample_loops() const;
 	[[nodiscard]] const std::vector<uint8_t>* audio_data() const;
+
+	[[nodiscard]] const Chunk& chunk(const ChunkKind &kind) const {
+		for (const auto& chunk : m_chunks) {
+			if (chunk.kind == kind) {
+				return chunk;
+			}
+		}
+		throw ParseError(
+			"Requested chunk kind not found in WAV file: " + get_chunk_kind_string(kind),
+			"get_chunk"
+		);
+	}
+
 	DECLARE_REFLECTABLE()
 };
 

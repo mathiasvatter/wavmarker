@@ -6,8 +6,6 @@
 #include "FileStream.h"
 #include "util/StreamUtils.h"
 
-namespace {
-
 constexpr bool kLittleEndian = false;
 
 void write_fourcc(FileOutputStream& out, const std::string& id) {
@@ -40,36 +38,10 @@ std::vector<uint8_t> write_to_bytes(const auto& value, FileOutputStream& parent_
 	return out.data();
 }
 
-} // namespace
-
-namespace WavMarker {
-
-namespace {
-
-std::string chunk_kind_name(const ChunkKind kind) {
-	switch (kind) {
-		case ChunkKind::Raw:
-			return "raw";
-		case ChunkKind::Format:
-			return "format";
-		case ChunkKind::Data:
-			return "data";
-		case ChunkKind::Cue:
-			return "cue";
-		case ChunkKind::List:
-			return "list";
-		case ChunkKind::Sampler:
-			return "sampler";
-		case ChunkKind::BroadcastExtension:
-			return "broadcast_extension";
-	}
-	return "unknown";
-}
-
 std::unique_ptr<JSONObject> make_chunk_json(const Chunk& chunk) {
 	auto json = std::make_unique<JSONObject>();
 	json->add("id", std::make_unique<JSONString>(chunk.id));
-	json->add("kind", std::make_unique<JSONString>(chunk_kind_name(chunk.kind)));
+	json->add("kind", std::make_unique<JSONString>(get_chunk_kind_string(chunk.kind)));
 	return json;
 }
 
@@ -81,7 +53,6 @@ std::unique_ptr<JSONValue> byte_preview_to_json(const std::vector<uint8_t>& byte
 	return preview;
 }
 
-} // namespace
 
 void FormatChunk::parse(FileInputStream& in) {
 	if (remaining_bytes(in) < 16) {
@@ -168,6 +139,13 @@ void ListSubChunk::write(FileOutputStream& out) const {
 	if ((bytes.size() & 1u) != 0u) {
 		out.put('\0');
 	}
+}
+
+std::unique_ptr<JSONValue> ListSubChunk::to_json() const {
+	auto obj = std::make_unique<JSONObject>();
+	obj->add("id", std::make_unique<JSONString>(id));
+	obj->add("label", label->to_json());
+	return obj;
 }
 
 void ListChunk::parse(FileInputStream& in) {
@@ -352,18 +330,18 @@ void Chunk::parse(FileInputStream& in) {
 	FileInputSubStream payload_stream(payload, in);
 	raw_payload = payload;
 
-	if (id == "fmt ") {
+	if (id == get_chunk_kind_id(ChunkKind::Format)) {
 		kind = ChunkKind::Format;
 		format.parse(payload_stream);
-	} else if (id == "data") {
+	} else if (id == get_chunk_kind_id(ChunkKind::Data)) {
 		kind = ChunkKind::Data;
 		audio_data = std::move(payload);
 		raw_payload.clear();
-	} else if (id == "cue ") {
+	} else if (id == get_chunk_kind_id(ChunkKind::Cue)) {
 		kind = ChunkKind::Cue;
 		const uint32_t count = StreamUtils::read_unsigned32(payload_stream, kLittleEndian);
 		if (remaining_bytes(payload_stream) < static_cast<size_t>(count) * 24u) {
-			throw ParseError("cue chunk does not contain all declared cue points.", payload_stream, "cue ");
+			throw ParseError("cue chunk does not contain all declared cue points.", payload_stream, get_chunk_kind_id(ChunkKind::Cue));
 		}
 		cue_points.clear();
 		cue_points.reserve(count);
@@ -372,13 +350,13 @@ void Chunk::parse(FileInputStream& in) {
 			cue_point.parse(payload_stream);
 			cue_points.push_back(std::move(cue_point));
 		}
-	} else if (id == "LIST") {
+	} else if (id == get_chunk_kind_id(ChunkKind::List)) {
 		kind = ChunkKind::List;
 		list.parse(payload_stream);
-	} else if (id == "smpl") {
+	} else if (id == get_chunk_kind_id(ChunkKind::Sampler)) {
 		kind = ChunkKind::Sampler;
 		sampler.parse(payload_stream);
-	} else if (id == "bext") {
+	} else if (id == get_chunk_kind_id(ChunkKind::BroadcastExtension)) {
 		kind = ChunkKind::BroadcastExtension;
 		bext.parse(payload_stream);
 	} else {
@@ -465,7 +443,7 @@ std::unique_ptr<JSONValue> Chunk::to_json() const {
 			if (id == "JUNK" || id == "junk") {
 				json->add("kind", std::make_unique<JSONString>("junk"));
 				json->add("purpose", std::make_unique<JSONString>("padding"));
-				json->add("byte_preview", byte_preview_to_json(raw_payload));
+				// json->add("byte_preview", byte_preview_to_json(raw_payload));
 			} else {
 				json->add("raw_payload", convert_to_json(raw_payload));
 			}
@@ -474,8 +452,6 @@ std::unique_ptr<JSONValue> Chunk::to_json() const {
 
 	return json;
 }
-
-} // namespace WavMarker
 
 void WavFile::parse(FileInputStream& in) {
 	m_chunks.clear();
@@ -498,7 +474,7 @@ void WavFile::parse(FileInputStream& in) {
 			throw ParseError("Trailing bytes before RIFF end cannot form a chunk header.", in, "Chunk Header");
 		}
 
-		WavMarker::Chunk chunk;
+		Chunk chunk;
 		chunk.parse(in);
 		if (static_cast<uint64_t>(in.offset()) > riff_end_offset) {
 			throw ParseError("WAV chunk exceeds RIFF boundary.", in, chunk.id);
@@ -538,29 +514,29 @@ std::unique_ptr<JSONValue> WavFile::to_json() const {
 	return json;
 }
 
-const WavMarker::FormatChunk* WavFile::format() const {
+const FormatChunk* WavFile::format() const {
 	for (const auto& chunk : m_chunks) {
-		if (chunk.kind == WavMarker::ChunkKind::Format) {
+		if (chunk.kind == ChunkKind::Format) {
 			return &chunk.format;
 		}
 	}
 	return nullptr;
 }
 
-std::vector<WavMarker::CuePoint> WavFile::cue_points() const {
-	std::vector<WavMarker::CuePoint> out;
+std::vector<CuePoint> WavFile::cue_points() const {
+	std::vector<CuePoint> out;
 	for (const auto& chunk : m_chunks) {
-		if (chunk.kind == WavMarker::ChunkKind::Cue) {
+		if (chunk.kind == ChunkKind::Cue) {
 			out.insert(out.end(), chunk.cue_points.begin(), chunk.cue_points.end());
 		}
 	}
 	return out;
 }
 
-std::vector<WavMarker::Label> WavFile::labels() const {
-	std::vector<WavMarker::Label> out;
+std::vector<Label> WavFile::labels() const {
+	std::vector<Label> out;
 	for (const auto& chunk : m_chunks) {
-		if (chunk.kind != WavMarker::ChunkKind::List || chunk.list.type != "adtl") {
+		if (chunk.kind != ChunkKind::List || chunk.list.type != "adtl") {
 			continue;
 		}
 		for (const auto& subchunk : chunk.list.subchunks) {
@@ -572,10 +548,10 @@ std::vector<WavMarker::Label> WavFile::labels() const {
 	return out;
 }
 
-std::vector<WavMarker::SampleLoop> WavFile::sample_loops() const {
-	std::vector<WavMarker::SampleLoop> out;
+std::vector<SampleLoop> WavFile::sample_loops() const {
+	std::vector<SampleLoop> out;
 	for (const auto& chunk : m_chunks) {
-		if (chunk.kind == WavMarker::ChunkKind::Sampler) {
+		if (chunk.kind == ChunkKind::Sampler) {
 			out.insert(out.end(), chunk.sampler.loops.begin(), chunk.sampler.loops.end());
 		}
 	}
@@ -584,7 +560,7 @@ std::vector<WavMarker::SampleLoop> WavFile::sample_loops() const {
 
 const std::vector<uint8_t>* WavFile::audio_data() const {
 	for (const auto& chunk : m_chunks) {
-		if (chunk.kind == WavMarker::ChunkKind::Data) {
+		if (chunk.kind == ChunkKind::Data) {
 			return &chunk.audio_data;
 		}
 	}
