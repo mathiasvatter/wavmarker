@@ -4,6 +4,9 @@
 
 #pragma once
 
+#include <string>
+#include <unordered_map>
+
 enum class ChunkKind {
 	Raw,
 	Format,
@@ -39,4 +42,20 @@ static std::unordered_map<ChunkKind, std::string> chunk_kind_id_map = {
 };
 inline std::string get_chunk_kind_id(const ChunkKind& chunk_kind) {
 	return chunk_kind_id_map.at(chunk_kind);
+}
+
+/// a map that returns the string ids for a provided ChunkKind enum member
+static inline std::unordered_map<std::string, ChunkKind> chunk_kind_from_id_map = [] {
+	std::unordered_map<std::string, ChunkKind> chunk_kind_from_id_map;
+	for (const auto& [chunk_kind, chunk_id] : chunk_kind_id_map) {
+		chunk_kind_from_id_map[chunk_id] = chunk_kind;
+	}
+	return chunk_kind_from_id_map;
+}();
+
+inline ChunkKind get_chunk_kind_from_id(const std::string& id) {
+	if (auto it = chunk_kind_from_id_map.find(id); it != chunk_kind_from_id_map.end()) {
+		return it->second;
+	}
+	return ChunkKind::Raw;
 }

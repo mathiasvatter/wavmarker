@@ -477,27 +477,9 @@ std::unique_ptr<Chunk> WavFile::parse_chunk(FileInputStream& in) {
 	}
 
 	FileInputSubStream payload_stream(payload, in);
-	std::unique_ptr<Chunk> chunk;
+	std::unique_ptr<Chunk> chunk = create_empty_chunk(get_chunk_kind_from_id(id));
 
-	if (id == get_chunk_kind_id(ChunkKind::Format)) {
-		chunk = std::make_unique<FormatChunk>();
-	} else if (id == get_chunk_kind_id(ChunkKind::Data)) {
-		chunk = std::make_unique<DataChunk>();
-	} else if (id == get_chunk_kind_id(ChunkKind::Cue)) {
-		chunk = std::make_unique<CueChunk>();
-	} else if (id == get_chunk_kind_id(ChunkKind::List)) {
-		chunk = std::make_unique<ListChunk>();
-	} else if (id == get_chunk_kind_id(ChunkKind::Sampler)) {
-		chunk = std::make_unique<SamplerChunk>();
-	} else if (id == get_chunk_kind_id(ChunkKind::BroadcastExtension)) {
-		chunk = std::make_unique<BextChunk>();
-	} else {
-		chunk = std::make_unique<RawChunk>(id);
-	}
-
-	if (chunk->kind != ChunkKind::Raw) {
-		chunk->id = id;
-	}
+	chunk->id = id;
 	chunk->parse(payload_stream);
 	return chunk;
 }
