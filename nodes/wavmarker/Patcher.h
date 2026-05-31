@@ -23,7 +23,7 @@ public:
 	explicit Patcher(WavFile& file) : file(file) {}
 
 	[[nodiscard]] bool apply_patch(const FieldPatch& patch) const {
-		auto chunk = file.ensure_chunk(patch.kind);
+		auto& chunk = file.ensure_chunk(patch.kind);
 		return chunk.set_member_value(patch.field_name, patch.value.get());
 	}
 

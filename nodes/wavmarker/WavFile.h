@@ -17,7 +17,39 @@
 class FileInputStream;
 class FileOutputStream;
 
-struct FormatChunk : Reflectable {
+struct Chunk : Reflectable {
+	std::string id;
+	ChunkKind kind = ChunkKind::Raw;
+
+	explicit Chunk(ChunkKind kind = ChunkKind::Raw, std::string id = {});
+	virtual ~Chunk() = default;
+
+	virtual void parse(FileInputStream& in) = 0;
+	virtual void write(FileOutputStream& out) const = 0;
+	[[nodiscard]] virtual size_t payload_size() const = 0;
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
+	DECLARE_REFLECTABLE()
+
+protected:
+	void write_chunk(FileOutputStream& out, const std::vector<uint8_t>& payload) const;
+};
+DEFINE_REFLECTABLE_MEMBERS(Chunk, id, kind)
+
+struct RawChunk final : Chunk {
+	std::vector<uint8_t> raw_payload;
+
+	RawChunk();
+	explicit RawChunk(std::string id);
+
+	void parse(FileInputStream& in) override;
+	void write(FileOutputStream& out) const override;
+	[[nodiscard]] size_t payload_size() const override { return raw_payload.size(); }
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
+	DECLARE_REFLECTABLE()
+};
+DEFINE_REFLECTABLE_MEMBERS(RawChunk, raw_payload)
+
+struct FormatChunk final : Chunk {
 	uint16_t audio_format = 0;
 	uint16_t channels = 0;
 	uint32_t sample_rate = 0;
@@ -26,11 +58,28 @@ struct FormatChunk : Reflectable {
 	uint16_t bits_per_sample = 0;
 	std::vector<uint8_t> extra_bytes;
 
-	void parse(FileInputStream& in);
-	void write(FileOutputStream& out) const;
+	FormatChunk();
+
+	void parse(FileInputStream& in) override;
+	void write(FileOutputStream& out) const override;
+	[[nodiscard]] size_t payload_size() const override { return 16 + extra_bytes.size(); }
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
 DEFINE_REFLECTABLE_MEMBERS(FormatChunk, audio_format, channels, sample_rate, byte_rate, block_align, bits_per_sample, extra_bytes)
+
+struct DataChunk final : Chunk {
+	std::vector<uint8_t> audio_data;
+
+	DataChunk();
+
+	void parse(FileInputStream& in) override;
+	void write(FileOutputStream& out) const override;
+	[[nodiscard]] size_t payload_size() const override { return audio_data.size(); }
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
+	DECLARE_REFLECTABLE()
+};
+DEFINE_REFLECTABLE_MEMBERS(DataChunk, audio_data)
 
 struct CuePoint : Reflectable {
 	uint32_t id = 0;
@@ -68,10 +117,12 @@ struct ListSubChunk : Reflectable {
 };
 DEFINE_REFLECTABLE_MEMBERS(ListSubChunk, id, payload, label)
 
-struct ListChunk : Reflectable {
+struct ListChunk final : Chunk {
 	std::string type;
 	std::vector<ListSubChunk> subchunks;
 	std::vector<uint8_t> trailing_data;
+
+	ListChunk();
 
 	void remove_labels_by_cue_id(const std::unordered_set<uint32_t>& ids) {
 		std::erase_if(subchunks, [&ids](const ListSubChunk& subchunk) {
@@ -79,8 +130,10 @@ struct ListChunk : Reflectable {
 		});
 	}
 
-	void parse(FileInputStream& in);
-	void write(FileOutputStream& out) const;
+	void parse(FileInputStream& in) override;
+	void write(FileOutputStream& out) const override;
+	[[nodiscard]] size_t payload_size() const override;
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
 DEFINE_REFLECTABLE_MEMBERS(ListChunk, type, subchunks, trailing_data)
@@ -99,7 +152,7 @@ struct SampleLoop : Reflectable {
 };
 DEFINE_REFLECTABLE_MEMBERS(SampleLoop, cue_point_id, type, start, end, fraction, play_count)
 
-struct SamplerChunk : Reflectable {
+struct SamplerChunk final : Chunk {
 	uint32_t manufacturer = 0;
 	uint32_t product = 0;
 	uint32_t sample_period = 0;
@@ -111,6 +164,8 @@ struct SamplerChunk : Reflectable {
 	std::vector<SampleLoop> loops;
 	std::vector<uint8_t> trailing_data;
 
+	SamplerChunk();
+
 	std::unordered_set<uint32_t> cue_ids_for_loops() const {
 		std::unordered_set<uint32_t> ids;
 		for (const auto& loop : loops) {
@@ -119,13 +174,15 @@ struct SamplerChunk : Reflectable {
 		return ids;
 	}
 
-	void parse(FileInputStream& in);
-	void write(FileOutputStream& out) const;
+	void parse(FileInputStream& in) override;
+	void write(FileOutputStream& out) const override;
+	[[nodiscard]] size_t payload_size() const override { return 36 + loops.size() * 24 + trailing_data.size(); }
+	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
 DEFINE_REFLECTABLE_MEMBERS(SamplerChunk, manufacturer, product, sample_period, midi_unity_note, midi_pitch_fraction, smpte_format, smpte_offset, sampler_data, loops, trailing_data)
 
-struct BextChunk : Reflectable {
+struct BextChunk final : Chunk {
 	std::string description;
 	std::string originator;
 	std::string originator_reference;
@@ -142,24 +199,21 @@ struct BextChunk : Reflectable {
 	std::vector<uint8_t> reserved;
 	std::string coding_history;
 
-	void parse(FileInputStream& in);
-	void write(FileOutputStream& out) const;
+	BextChunk();
+
+	void parse(FileInputStream& in) override;
+	void write(FileOutputStream& out) const override;
+	[[nodiscard]] size_t payload_size() const override { return 602 + coding_history.size(); }
 	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
 DEFINE_REFLECTABLE_MEMBERS(BextChunk, description, originator, originator_reference, origination_date, origination_time, time_reference, version, umid, loudness_value, loudness_range, max_true_peak_level, max_momentary_loudness, max_short_term_loudness, reserved, coding_history)
 
-struct Chunk : Reflectable {
-	std::string id;
-	ChunkKind kind = ChunkKind::Raw;
-	std::vector<uint8_t> raw_payload;
-	FormatChunk format;
-	std::vector<uint8_t> audio_data;
+struct CueChunk final : Chunk {
 	std::vector<CuePoint> cue_points;
 	std::map<uint32_t, CuePoint*> cue_point_map;
-	ListChunk list;
-	SamplerChunk sampler;
-	BextChunk bext;
+
+	CueChunk();
 
 	void rebuild_cue_point_map() {
 		cue_point_map.clear();
@@ -175,25 +229,26 @@ struct Chunk : Reflectable {
 		rebuild_cue_point_map();
 	}
 
-	void parse(FileInputStream& in);
-	void write(FileOutputStream& out) const;
+	void parse(FileInputStream& in) override;
+	void write(FileOutputStream& out) const override;
+	[[nodiscard]] size_t payload_size() const override { return 4 + cue_points.size() * 24; }
 	[[nodiscard]] std::unique_ptr<JSONValue> to_json() const override;
 	DECLARE_REFLECTABLE()
 };
-DEFINE_REFLECTABLE_MEMBERS(Chunk, id, kind, raw_payload, format, audio_data, cue_points, list, sampler, bext)
+DEFINE_REFLECTABLE_MEMBERS(CueChunk, cue_points)
 
 
 class WavFile final : public Container {
 	struct SampleLoopCueReferences {
-		const Chunk* sampler_chunk = nullptr;
-		const Chunk* cue_chunk = nullptr;
+		const SamplerChunk* sampler_chunk = nullptr;
+		const CueChunk* cue_chunk = nullptr;
 		std::vector<uint32_t> cue_ids_in_order;
 		std::unordered_set<uint32_t> cue_ids;
 	};
 
 	std::string m_riff_id = "RIFF";
 	std::string m_wave_id = "WAVE";
-	std::vector<Chunk> m_chunks;
+	std::vector<std::unique_ptr<Chunk>> m_chunks;
 
 	[[nodiscard]] SampleLoopCueReferences validate_sample_loop_cues() const;
 
@@ -204,7 +259,7 @@ public:
 
 	[[nodiscard]] const std::string& riff_id() const { return m_riff_id; }
 	[[nodiscard]] const std::string& wave_id() const { return m_wave_id; }
-	[[nodiscard]] const std::vector<Chunk>& chunks() const { return m_chunks; }
+	[[nodiscard]] const std::vector<std::unique_ptr<Chunk>>& chunks() const { return m_chunks; }
 
 	[[nodiscard]] const FormatChunk* format() const;
 	[[nodiscard]] std::vector<CuePoint> cue_points() const;
@@ -214,17 +269,27 @@ public:
 	void copy_sample_loops_from(WavFile& source, bool include_labels = true);
 
 	Chunk* find_chunk(const ChunkKind kind) noexcept {
-		const auto it = std::ranges::find_if(m_chunks, [kind](const Chunk& chunk) {
-			return chunk.kind == kind;
+		const auto it = std::ranges::find_if(m_chunks, [kind](const std::unique_ptr<Chunk>& chunk) {
+			return chunk->kind == kind;
 		});
-		return it == m_chunks.end() ? nullptr : &*it;
+		return it == m_chunks.end() ? nullptr : it->get();
 	}
 
 	[[nodiscard]] const Chunk* find_chunk(const ChunkKind kind) const noexcept {
-		const auto it = std::ranges::find_if(m_chunks, [kind](const Chunk& chunk) {
-			return chunk.kind == kind;
+		const auto it = std::ranges::find_if(m_chunks, [kind](const std::unique_ptr<Chunk>& chunk) {
+			return chunk->kind == kind;
 		});
-		return it == m_chunks.end() ? nullptr : &*it;
+		return it == m_chunks.end() ? nullptr : it->get();
+	}
+
+	template<typename T>
+	T* find_chunk_as(const ChunkKind kind) noexcept {
+		return dynamic_cast<T*>(find_chunk(kind));
+	}
+
+	template<typename T>
+	[[nodiscard]] const T* find_chunk_as(const ChunkKind kind) const noexcept {
+		return dynamic_cast<const T*>(find_chunk(kind));
 	}
 
 	/// returns chunk, tries to find it, if not, creates it
@@ -233,18 +298,21 @@ public:
 			return *chunk;
 		}
 
-		Chunk chunk;
-		chunk.kind = kind;
-		chunk.id = get_chunk_kind_id(kind);
-		m_chunks.push_back(std::move(chunk));
-		return m_chunks.back();
+		m_chunks.push_back(create_empty_chunk(kind));
+		return *m_chunks.back();
+	}
+
+	template<typename T>
+	T& ensure_chunk_as(const ChunkKind kind) noexcept {
+		return static_cast<T&>(ensure_chunk(kind));
 	}
 
 	[[nodiscard]] uint32_t next_free_cue_id() const {
 		uint32_t max_id = 0;
 		for (const auto& chunk : m_chunks) {
-			if (chunk.kind != ChunkKind::Cue) continue;
-			for (const auto& cue_point : chunk.cue_points) {
+			const auto* cue_chunk = dynamic_cast<const CueChunk*>(chunk.get());
+			if (!cue_chunk) continue;
+			for (const auto& cue_point : cue_chunk->cue_points) {
 				max_id = std::max(max_id, cue_point.id);
 			}
 		}
@@ -255,6 +323,10 @@ public:
 	}
 
 	DECLARE_REFLECTABLE()
+
+private:
+	static std::unique_ptr<Chunk> create_empty_chunk(ChunkKind kind);
+	static std::unique_ptr<Chunk> parse_chunk(FileInputStream& in);
 };
 
 DEFINE_REFLECTABLE_MEMBERS(WavFile, m_riff_id, m_wave_id, m_chunks)
