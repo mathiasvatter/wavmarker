@@ -1,48 +1,14 @@
-#include "nodes/wavmarker/WavFile.h"
-
-#include <algorithm>
-#include <limits>
+#include "WavFile.h"
 
 #include "FileStream.h"
 #include "util/StreamUtils.h"
 
 constexpr bool kLittleEndian = false;
 
-void write_fourcc(FileOutputStream& out, const std::string& id) {
-	if (id.size() != 4) {
-		throw WriteError("Invalid fourcc length for '" + id + "'", out, "Writing fourcc");
-	}
-	StreamUtils::write_ascii(out, id, 4);
-}
-
-size_t remaining_bytes(FileInputStream& in) {
-	auto& stream = in.stream();
-	const auto current = stream.tellg();
-	if (current == std::istream::pos_type(-1)) {
-		return 0;
-	}
-
-	stream.seekg(0, std::ios::end);
-	const auto end = stream.tellg();
-	stream.seekg(current);
-	if (end == std::istream::pos_type(-1) || end < current) {
-		return 0;
-	}
-
-	return static_cast<size_t>(end - current);
-}
-
 std::vector<uint8_t> write_to_bytes(const auto& value, FileOutputStream& parent_stream) {
 	FileOutputSubStream out(parent_stream);
 	value.write(out);
 	return out.data();
-}
-
-std::unique_ptr<JSONObject> make_chunk_json(const Chunk& chunk) {
-	auto json = std::make_unique<JSONObject>();
-	json->add("id", std::make_unique<JSONString>(chunk.id));
-	json->add("kind", std::make_unique<JSONString>(get_chunk_kind_string(chunk.kind)));
-	return json;
 }
 
 std::unique_ptr<JSONValue> byte_preview_to_json(const std::vector<uint8_t>& bytes, const size_t max_size = 32) {
@@ -55,7 +21,7 @@ std::unique_ptr<JSONValue> byte_preview_to_json(const std::vector<uint8_t>& byte
 
 
 void FormatChunk::parse(FileInputStream& in) {
-	if (remaining_bytes(in) < 16) {
+	if (in.remaining_bytes() < 16) {
 		throw ParseError("fmt chunk is too short.", in, "fmt ", "At least 16 bytes");
 	}
 
@@ -90,7 +56,7 @@ void CuePoint::parse(FileInputStream& in) {
 void CuePoint::write(FileOutputStream& out) const {
 	StreamUtils::write_unsigned32(out, id, kLittleEndian);
 	StreamUtils::write_unsigned32(out, position, kLittleEndian);
-	write_fourcc(out, data_chunk_id.empty() ? "data" : data_chunk_id);
+	StreamUtils::write_ascii(out, data_chunk_id.empty() ? get_chunk_kind_id(ChunkKind::Data) : data_chunk_id, 4);
 	StreamUtils::write_unsigned32(out, chunk_start, kLittleEndian);
 	StreamUtils::write_unsigned32(out, block_start, kLittleEndian);
 	StreamUtils::write_unsigned32(out, sample_offset, kLittleEndian);
@@ -112,7 +78,7 @@ void ListSubChunk::parse(FileInputStream& in, const std::string& list_type) {
 	const uint32_t size = StreamUtils::read_unsigned32(in, kLittleEndian);
 	payload = StreamUtils::read_n_bytes(in, size);
 
-	if ((size & 1u) != 0u && remaining_bytes(in) > 0) {
+	if ((size & 1u) != 0u && in.remaining_bytes() > 0) {
 		(void)StreamUtils::read_byte(in);
 	}
 
@@ -125,7 +91,7 @@ void ListSubChunk::parse(FileInputStream& in, const std::string& list_type) {
 }
 
 void ListSubChunk::write(FileOutputStream& out) const {
-	write_fourcc(out, id);
+	StreamUtils::write_ascii(out, id, 4);
 
 	std::vector<uint8_t> bytes;
 	if (label) {
@@ -149,7 +115,7 @@ std::unique_ptr<JSONValue> ListSubChunk::to_json() const {
 }
 
 void ListChunk::parse(FileInputStream& in) {
-	if (remaining_bytes(in) < 4) {
+	if (in.remaining_bytes() < 4) {
 		throw ParseError("LIST chunk is too short.", in, "LIST", "At least 4 bytes");
 	}
 
@@ -157,19 +123,19 @@ void ListChunk::parse(FileInputStream& in) {
 	subchunks.clear();
 	trailing_data.clear();
 
-	while (remaining_bytes(in) >= 8) {
+	while (in.remaining_bytes() >= 8) {
 		ListSubChunk subchunk;
 		subchunk.parse(in, type);
 		subchunks.push_back(std::move(subchunk));
 	}
 
-	if (remaining_bytes(in) > 0) {
+	if (in.remaining_bytes() > 0) {
 		trailing_data = StreamUtils::read_all_remaining_bytes(in);
 	}
 }
 
 void ListChunk::write(FileOutputStream& out) const {
-	write_fourcc(out, type.empty() ? "adtl" : type);
+	StreamUtils::write_ascii(out, type.empty() ? "adtl" : type, 4);
 	for (const auto& subchunk : subchunks) {
 		subchunk.write(out);
 	}
@@ -195,7 +161,7 @@ void SampleLoop::write(FileOutputStream& out) const {
 }
 
 void SamplerChunk::parse(FileInputStream& in) {
-	if (remaining_bytes(in) < 36) {
+	if (in.remaining_bytes() < 36) {
 		throw ParseError("smpl chunk is too short.", in, "smpl", "At least 36 bytes");
 	}
 
@@ -209,7 +175,7 @@ void SamplerChunk::parse(FileInputStream& in) {
 
 	const uint32_t loop_count = StreamUtils::read_unsigned32(in, kLittleEndian);
 	sampler_data = StreamUtils::read_unsigned32(in, kLittleEndian);
-	if (remaining_bytes(in) < static_cast<size_t>(loop_count) * 24u) {
+	if (in.remaining_bytes() < static_cast<size_t>(loop_count) * 24u) {
 		throw ParseError("smpl chunk does not contain all declared loops.", in, "smpl");
 	}
 
@@ -241,7 +207,7 @@ void SamplerChunk::write(FileOutputStream& out) const {
 }
 
 void BextChunk::parse(FileInputStream& in) {
-	if (remaining_bytes(in) < 602) {
+	if (in.remaining_bytes() < 602) {
 		throw ParseError("bext chunk is too short.", in, "bext", "At least 602 bytes");
 	}
 
@@ -323,7 +289,7 @@ void Chunk::parse(FileInputStream& in) {
 	const uint32_t size = StreamUtils::read_unsigned32(in, kLittleEndian);
 	auto payload = StreamUtils::read_n_bytes(in, size);
 
-	if ((size & 1u) != 0u && remaining_bytes(in) > 0) {
+	if ((size & 1u) != 0u && in.remaining_bytes() > 0) {
 		(void)StreamUtils::read_byte(in);
 	}
 
@@ -340,7 +306,7 @@ void Chunk::parse(FileInputStream& in) {
 	} else if (id == get_chunk_kind_id(ChunkKind::Cue)) {
 		kind = ChunkKind::Cue;
 		const uint32_t count = StreamUtils::read_unsigned32(payload_stream, kLittleEndian);
-		if (remaining_bytes(payload_stream) < static_cast<size_t>(count) * 24u) {
+		if (payload_stream.remaining_bytes() < static_cast<size_t>(count) * 24u) {
 			throw ParseError("cue chunk does not contain all declared cue points.", payload_stream, get_chunk_kind_id(ChunkKind::Cue));
 		}
 		cue_points.clear();
@@ -366,7 +332,7 @@ void Chunk::parse(FileInputStream& in) {
 }
 
 void Chunk::write(FileOutputStream& out) const {
-	write_fourcc(out, id);
+	StreamUtils::write_ascii(out, id, 4);
 
 	std::vector<uint8_t> payload;
 	switch (kind) {
@@ -413,8 +379,9 @@ void Chunk::write(FileOutputStream& out) const {
 }
 
 std::unique_ptr<JSONValue> Chunk::to_json() const {
-	auto json = make_chunk_json(*this);
-
+	auto json = std::make_unique<JSONObject>();
+	json->add("id", std::make_unique<JSONString>(id));
+	json->add("kind", std::make_unique<JSONString>(get_chunk_kind_string(kind)));
 	switch (kind) {
 		case ChunkKind::Format:
 			json->add("payload_size", std::make_unique<JSONInt>(static_cast<long long>(16 + format.extra_bytes.size())));
@@ -486,7 +453,7 @@ void WavFile::parse(FileInputStream& in) {
 
 void WavFile::write(FileOutputStream& out) {
 	FileOutputSubStream body(out);
-	write_fourcc(body, m_wave_id);
+	StreamUtils::write_ascii(body, m_wave_id, 4);
 	for (const auto& chunk : m_chunks) {
 		chunk.write(body);
 	}
@@ -496,7 +463,7 @@ void WavFile::write(FileOutputStream& out) {
 		throw WriteError("WAV file exceeds RIFF uint32 size field.", out, "Writing RIFF header");
 	}
 
-	write_fourcc(out, m_riff_id);
+	StreamUtils::write_ascii(out, m_riff_id, 4);
 	StreamUtils::write_unsigned32(out, static_cast<uint32_t>(bytes.size()), kLittleEndian);
 	StreamUtils::write_bytes(out, bytes);
 }

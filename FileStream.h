@@ -7,8 +7,12 @@
 #include <istream>
 #include <ostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
 #include "util/Error.h"
 
@@ -63,6 +67,29 @@ public:
 
 	virtual std::istream& stream() { return m_file_stream; }
 	[[nodiscard]] long long offset() override {return m_file_stream.tellg();}
+	[[nodiscard]] virtual size_t remaining_bytes() {
+		auto& input = stream();
+		const auto current = input.tellg();
+		if (current == std::istream::pos_type(-1)) {
+			return 0;
+		}
+
+		input.seekg(0, std::ios::end);
+		const auto end = input.tellg();
+		if (end == std::istream::pos_type(-1) || end < current) {
+			input.clear();
+			input.seekg(current);
+			return 0;
+		}
+
+		input.seekg(current);
+		if (!input) {
+			input.clear();
+			return 0;
+		}
+
+		return static_cast<size_t>(end - current);
+	}
 	std::string content() {
 		return {std::istreambuf_iterator<char>(stream()), std::istreambuf_iterator<char>()};
 	}
