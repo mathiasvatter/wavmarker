@@ -37,6 +37,7 @@ add_executable(wavmarker
         util/StringUtils.h
         nodes/wavmarker/ChunkKind.h
         nodes/wavmarker/Patcher.h
+        nodes/CliApplication.h
 )
 
 target_include_directories(wavmarker
