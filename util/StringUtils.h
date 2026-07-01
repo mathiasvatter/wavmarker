@@ -4,14 +4,23 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
-#include <sstream>
-#include <regex>
-#include <array>
-#include <cmath>
-#include <ranges>
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cctype>
+#include <cstdint>
+#include <iomanip>
+#include <limits>
+#include <memory>
+#include <ranges>
+#include <regex>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace StringUtils {
 
@@ -77,156 +86,6 @@ inline std::string escape_json_string(std::string_view input) {
     }
 
     return escaped;
-}
-
-/// Formats 16 bytes (GUID layout in little-endian memory order) as UUID text:
-/// xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-/// First 4/2/2-byte groups are byte-swapped, the last 8 bytes stay in order.
-inline std::string format_uuid_le_guid(const std::vector<uint8_t>& bytes) {
-    if (bytes.size() != 16) {
-        static constexpr char hex[] = "0123456789abcdef";
-        std::string raw;
-        raw.reserve(bytes.size() * 2);
-        for (const uint8_t b : bytes) {
-            raw.push_back(hex[(b >> 4) & 0x0F]);
-            raw.push_back(hex[b & 0x0F]);
-        }
-        return raw;
-    }
-
-    static constexpr char hex[] = "0123456789abcdef";
-    std::string out;
-    out.reserve(36);
-
-    const auto append_byte = [&](uint8_t b) {
-        out.push_back(hex[(b >> 4) & 0x0F]);
-        out.push_back(hex[b & 0x0F]);
-    };
-
-    append_byte(bytes[3]); append_byte(bytes[2]); append_byte(bytes[1]); append_byte(bytes[0]);
-    out.push_back('-');
-    append_byte(bytes[5]); append_byte(bytes[4]);
-    out.push_back('-');
-    append_byte(bytes[7]); append_byte(bytes[6]);
-    out.push_back('-');
-    append_byte(bytes[8]); append_byte(bytes[9]);
-    out.push_back('-');
-    append_byte(bytes[10]); append_byte(bytes[11]); append_byte(bytes[12]);
-    append_byte(bytes[13]); append_byte(bytes[14]); append_byte(bytes[15]);
-
-    return out;
-}
-
-/// Formats 16 bytes as UUID text without endian conversion:
-/// xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-/// Bytes are used in their original order.
-inline std::string format_uuid_be_raw(const std::vector<uint8_t>& bytes) {
-    static constexpr char hex[] = "0123456789abcdef";
-
-    if (bytes.size() != 16) {
-        std::string raw;
-        raw.reserve(bytes.size() * 2);
-        for (const uint8_t b : bytes) {
-            raw.push_back(hex[(b >> 4) & 0x0F]);
-            raw.push_back(hex[b & 0x0F]);
-        }
-        return raw;
-    }
-
-    std::string out;
-    out.reserve(36);
-
-    const auto append_byte = [&](uint8_t b) {
-        out.push_back(hex[(b >> 4) & 0x0F]);
-        out.push_back(hex[b & 0x0F]);
-    };
-
-    append_byte(bytes[0]); append_byte(bytes[1]); append_byte(bytes[2]); append_byte(bytes[3]);
-    out.push_back('-');
-    append_byte(bytes[4]); append_byte(bytes[5]);
-    out.push_back('-');
-    append_byte(bytes[6]); append_byte(bytes[7]);
-    out.push_back('-');
-    append_byte(bytes[8]); append_byte(bytes[9]);
-    out.push_back('-');
-    append_byte(bytes[10]); append_byte(bytes[11]); append_byte(bytes[12]);
-    append_byte(bytes[13]); append_byte(bytes[14]); append_byte(bytes[15]);
-
-    return out;
-}
-
-/// Estimates the Shannon entropy of a byte buffer in bits per byte.
-inline double calculate_byte_entropy(const std::vector<uint8_t>& bytes) {
-    if (bytes.empty()) {
-        return 0.0;
-    }
-
-    std::array<size_t, 256> histogram{};
-    for (const uint8_t b : bytes) {
-        histogram[b]++;
-    }
-
-    const double size = static_cast<double>(bytes.size());
-    double entropy = 0.0;
-    for (const size_t count : histogram) {
-        if (count == 0) {
-            continue;
-        }
-        const double p = static_cast<double>(count) / size;
-        entropy -= p * std::log2(p);
-    }
-
-    return entropy;
-}
-
-/// Heuristic only: high-entropy buffers are more likely encrypted, but compressed data can look similar.
-inline bool is_likely_encrypted_blob(const std::vector<uint8_t>& bytes) {
-    if (bytes.size() < 64) {
-        return false;
-    }
-
-    std::array<size_t, 256> histogram{};
-    size_t zero_count = 0;
-    size_t printable_count = 0;
-    size_t repeated_adjacent_count = 0;
-
-    uint8_t previous = 0;
-    bool has_previous = false;
-
-    for (const uint8_t b : bytes) {
-        histogram[b]++;
-        if (b == 0) {
-            zero_count++;
-        }
-        if (b >= 32 && b <= 126) {
-            printable_count++;
-        }
-        if (has_previous && b == previous) {
-            repeated_adjacent_count++;
-        }
-        previous = b;
-        has_previous = true;
-    }
-
-    const double size = static_cast<double>(bytes.size());
-    const double entropy = calculate_byte_entropy(bytes);
-    const double zero_ratio = static_cast<double>(zero_count) / size;
-    const double printable_ratio = static_cast<double>(printable_count) / size;
-    const double repeated_ratio = static_cast<double>(repeated_adjacent_count) / size;
-
-    size_t used_symbols = 0;
-    for (const size_t count : histogram) {
-        if (count > 0) {
-            used_symbols++;
-        }
-    }
-    const double symbol_ratio = static_cast<double>(used_symbols) / 256.0;
-
-    return entropy >= 7.85
-        && zero_ratio <= 0.02
-        && printable_ratio <= 0.20
-        && repeated_ratio <= 0.02
-        && symbol_ratio >= 0.50;
 }
 
 /// Returns a string with any whitespace trimmed from its start.
