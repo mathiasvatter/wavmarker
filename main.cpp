@@ -15,7 +15,7 @@
 
 namespace {
 
-void terminate_handler() {
+void handle_terminate() {
 	std::exception_ptr current_ex = std::current_exception();
 	if (current_ex) {
 		try {
@@ -166,7 +166,7 @@ void debug() {
 }
 
 int main(int argc, const char* argv[]) {
-	std::set_terminate(terminate_handler);
+	std::set_terminate(handle_terminate);
 
 #ifndef NDEBUG
 	debug();

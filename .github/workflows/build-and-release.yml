@@ -102,7 +102,11 @@ jobs:
 
       - name: Build Windows (build.bat)
         shell: cmd
-        run: build.bat release
+        run: |
+          set "PATH=C:\msys64\mingw64\bin;C:\msys64\usr\bin;%PATH%"
+          set "CC=clang"
+          set "CXX=clang++"
+          build.bat release
 
       - name: Prepare artifact
         shell: cmd
