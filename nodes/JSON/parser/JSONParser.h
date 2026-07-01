@@ -21,11 +21,15 @@ public:
 	explicit JSONParser(std::vector<JSONToken> tokens) : m_tokens(std::move(tokens)) {}
 
 	std::unique_ptr<JSONValue> parse() {
-		return parse_value();
+		auto value = parse_value();
+		if (peek().type != jtoken::END_TOKEN) {
+			throw JSONParseError("Unexpected content after JSON value.", "end of input", peek());
+		}
+		return value;
 	}
 
 	std::unique_ptr<JSONValue> parse(const std::string& json, std::string file) {
-		static JSONTokenizer tokenizer(json, std::move(file));
+		JSONTokenizer tokenizer(json, std::move(file));
 		m_tokens = tokenizer.tokenize();
 		m_pos = 0;
 		return JSONParser::parse();
@@ -170,16 +174,8 @@ private:
     		}
     	} else { // Treat as integer
     		try {
-    			// JSON integers can be large, consider std::stoll if JSONInt stores long long
-    			// For now, assuming JSONInt takes int.
-    			long long long_val = std::stoll(final_val_str); // Parse as long long first
-    			// Check if it fits into int if JSONInt stores int
-    			if (long_val < std::numeric_limits<int>::min() || long_val > std::numeric_limits<int>::max()) {
-    				throw JSONParseError("Integer value '" + final_val_str + "' out of range for int.",
-									number_token.file, (long long)number_token.line, number_token.pos,
-									"integer within int range", final_val_str);
-    			}
-    			return std::make_unique<JSONInt>(static_cast<int>(long_val));
+			const long long value = std::stoll(final_val_str);
+			return std::make_unique<JSONInt>(value);
     		} catch (...) {
     			throw JSONParseError("Unable to parse integer: '" + final_val_str + "'.",
 								 number_token.file, (long long)number_token.line, number_token.pos,

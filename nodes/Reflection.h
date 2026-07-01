@@ -228,9 +228,17 @@ void assign_from_json(T& member, JSONValue* jsonVal) {
 					  << (jsonVal ? typeid(*jsonVal).name() : "null") << std::endl;
 		}
 	} else if constexpr (std::is_integral_v<T>) {
+		auto is_in_range = [](const long long value) {
+			if constexpr (std::is_signed_v<T>) {
+				return value >= static_cast<long long>(std::numeric_limits<T>::min()) &&
+					value <= static_cast<long long>(std::numeric_limits<T>::max());
+			} else {
+				return value >= 0 && static_cast<unsigned long long>(value) <=
+					static_cast<unsigned long long>(std::numeric_limits<T>::max());
+			}
+		};
 		if (auto* iv = dynamic_cast<JSONInt*>(jsonVal)) {
-			if (iv->value < static_cast<long long>(std::numeric_limits<T>::min()) ||
-				iv->value > static_cast<long long>(std::numeric_limits<T>::max())) {
+			if (!is_in_range(iv->value)) {
 				std::cerr << "Fehler: JSONInt außerhalb des Wertebereichs für Typ " << typeid(T).name() << std::endl;
 			} else {
 				member = static_cast<T>(iv->value);
@@ -238,8 +246,7 @@ void assign_from_json(T& member, JSONValue* jsonVal) {
 		} else if (auto* sv = dynamic_cast<JSONString*>(jsonVal)) {
 			try {
 				const auto parsed = std::stoll(sv->value);
-				if (parsed < static_cast<long long>(std::numeric_limits<T>::min()) ||
-					parsed > static_cast<long long>(std::numeric_limits<T>::max())) {
+				if (!is_in_range(parsed)) {
 					std::cerr << "Fehler: JSONString außerhalb des Wertebereichs für Typ " << typeid(T).name() << std::endl;
 				} else {
 					member = static_cast<T>(parsed);

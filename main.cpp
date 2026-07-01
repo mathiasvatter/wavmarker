@@ -7,6 +7,8 @@
 
 #include "Generator.h"
 #include "Parser.h"
+#include "nodes/JSON/parser/JSONParser.h"
+#include "nodes/wavmarker/Patcher.h"
 #include "nodes/wavmarker/WavFile.h"
 #include "util/Error.h"
 #include "version.h"
@@ -41,6 +43,9 @@ void print_usage(const char* executable) {
 		<< "Usage:\n"
 		<< "  " << executable << " <input.wav> [output.wav]\n"
 		<< "  " << executable << " --info <input.wav>\n"
+		<< "  " << executable << " --set <bext.field>=<json-value> <input.wav>\n"
+		<< "  " << executable << " --get <bext.field> <input.wav>\n"
+		<< "  " << executable << " --copy-sample-loops <source.wav> <target.wav> [--no-labels]\n"
 		<< "  " << executable << " --version\n";
 }
 
@@ -76,6 +81,70 @@ WavFile& require_wav(Container& container) {
 		throw RuntimeError("Parsed container is not a WavFile.", "CLI");
 	}
 	return *wav;
+}
+
+/// Parses a CLI value according to the reflected BEXT field type.
+std::unique_ptr<JSONValue> parse_bext_value(const std::string& field_path, const std::string& text) {
+	const std::type_index field_type = Patcher::bext_field_type(field_path);
+	if (field_type == typeid(std::string) && (text.empty() || (text.front() != '"' && text.front() != '\''))) {
+		// Shell syntax such as "originator"="Sonuscore" reaches us without quotes.
+		return std::make_unique<JSONString>(text);
+	}
+
+	JSONParser parser;
+	auto value = parser.parse(text, "CLI --set");
+	if (field_type == typeid(std::string) && !dynamic_cast<JSONString*>(value.get())) {
+		throw RuntimeError("BEXT field expects a string value: " + field_path, "Parsing --set value");
+	}
+	if (field_type == typeid(std::vector<uint8_t>) && !dynamic_cast<JSONArray*>(value.get())) {
+		throw RuntimeError("BEXT field expects a JSON byte array: " + field_path, "Parsing --set value");
+	}
+	if (field_type != typeid(std::string) && field_type != typeid(std::vector<uint8_t>) &&
+		!dynamic_cast<JSONInt*>(value.get()) && !dynamic_cast<JSONString*>(value.get())) {
+		throw RuntimeError("BEXT field expects an integer value: " + field_path, "Parsing --set value");
+	}
+	return value;
+}
+
+void set_bext_field(const std::string& assignment, const std::string& input_path) {
+	const size_t separator = assignment.find('=');
+	if (separator == std::string::npos || separator == 0 || separator + 1 == assignment.size()) {
+		throw RuntimeError("Expected <bext.field>=<json-value>, got: " + assignment, "Parsing --set");
+	}
+
+	const std::string field_path = assignment.substr(0, separator);
+	auto value = parse_bext_value(field_path, assignment.substr(separator + 1));
+	auto container = Parser::parse_file(input_path);
+	auto& wav = require_wav(*container);
+	Patcher patcher(wav);
+	auto patch = Patcher::create_bext_patch(field_path, std::move(value));
+	if (!patcher.apply_patch(patch)) {
+		throw RuntimeError("Could not set BEXT field: " + field_path, "Applying --set");
+	}
+
+	Generator::write_file(wav, input_path);
+	std::cout << "Set " << field_path << " in " << input_path << "\n";
+}
+
+void get_bext_field(const std::string& field_path, const std::string& input_path) {
+	auto container = Parser::parse_file(input_path);
+	auto& wav = require_wav(*container);
+	std::cout << Patcher(wav).get_bext_value(field_path)->get_string() << "\n";
+}
+
+/// Copies sample-loop metadata into target_path and overwrites that WAV in place.
+void copy_sample_loops(const std::string& source_path, const std::string& target_path,
+	const bool include_labels) {
+	auto source_container = Parser::parse_file(source_path);
+	auto target_container = Parser::parse_file(target_path);
+	auto& source = require_wav(*source_container);
+	auto& target = require_wav(*target_container);
+
+	target.copy_sample_loops_from(source, include_labels);
+	Generator::write_file(target, target_path);
+
+	std::cout << "Copied " << target.sample_loops().size() << " sample loop(s) from "
+		<< source_path << " to " << target_path << "\n";
 }
 
 } // namespace
@@ -118,6 +187,39 @@ int main(int argc, const char* argv[]) {
 		}
 		if (first_arg == "--version" || first_arg == "-v") {
 			std::cout << PROJECT_VERSION << "\n";
+			return 0;
+		}
+		if (first_arg == "--set") {
+			if (argc != 4) {
+				print_usage(argv[0]);
+				return 1;
+			}
+			set_bext_field(argv[2], argv[3]);
+			return 0;
+		}
+		if (first_arg == "--get") {
+			if (argc != 4) {
+				print_usage(argv[0]);
+				return 1;
+			}
+			get_bext_field(argv[2], argv[3]);
+			return 0;
+		}
+		if (first_arg == "--copy-sample-loops") {
+			if (argc != 4 && argc != 5) {
+				print_usage(argv[0]);
+				return 1;
+			}
+			bool include_labels = true;
+			if (argc == 5) {
+				if (std::string(argv[4]) != "--no-labels") {
+					std::cerr << "Unknown option: " << argv[4] << "\n";
+					print_usage(argv[0]);
+					return 1;
+				}
+				include_labels = false;
+			}
+			copy_sample_loops(argv[2], argv[3], include_labels);
 			return 0;
 		}
 
