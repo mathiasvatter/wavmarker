@@ -19,25 +19,25 @@ add_definitions(-DPROJECT_DIR="${CMAKE_SOURCE_DIR}")
 
 add_executable(wavmarker
         main.cpp
-        Parser.cpp
-        Parser.h
-        Generator.h
-        FileStream.h
-        nodes/Container.h
-        nodes/Reflection.h
-        nodes/JSON/ast/JSONValue.cpp
-        nodes/JSON/ast/JSONValue.h
-        nodes/JSON/visitor/JSONPrintVisitor.h
-        nodes/JSON/visitor/JSONVisitor.h
-        nodes/wavmarker/WavFile.cpp
-        nodes/wavmarker/WavFile.h
+        src/Parser.cpp
+        src/Parser.h
+        src/Generator.h
+        util/FileStream.h
+        src/Container.h
+        src/Reflection.h
+        src/JSON/ast/JSONValue.cpp
+        src/JSON/ast/JSONValue.h
+        src/JSON/visitor/JSONPrintVisitor.h
+        src/JSON/visitor/JSONVisitor.h
+        src/wavmarker/WavFile.cpp
+        src/wavmarker/WavFile.h
         util/Error.cpp
         util/Error.h
         util/StreamUtils.h
         util/StringUtils.h
-        nodes/wavmarker/ChunkKind.h
-        nodes/wavmarker/Patcher.h
-        nodes/CliApplication.h
+        src/wavmarker/ChunkKind.h
+        src/wavmarker/Patcher.h
+        src/CliApplication.h
 )
 
 target_include_directories(wavmarker

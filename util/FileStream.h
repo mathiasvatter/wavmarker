@@ -14,7 +14,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "util/Error.h"
+#include "Error.h"
 
 class FileStream {
 protected:

@@ -1,6 +1,6 @@
 #include "WavFile.h"
 
-#include "FileStream.h"
+#include "../../util/FileStream.h"
 #include "util/StreamUtils.h"
 
 constexpr bool kLittleEndian = false;

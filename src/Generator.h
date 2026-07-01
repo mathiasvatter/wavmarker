@@ -3,9 +3,9 @@
 #include <filesystem>
 #include <string>
 
-#include "FileStream.h"
-#include "nodes/Container.h"
-#include "nodes/Reflection.h"
+#include "../util/FileStream.h"
+#include "Container.h"
+#include "Reflection.h"
 
 class Generator {
 public:
