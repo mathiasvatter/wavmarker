@@ -153,16 +153,15 @@ void debug() {
 	auto project_dir = std::filesystem::path(PROJECT_DIR);
 	auto samples_dir = project_dir / "samples";
 
-	std::string file_path;
-	file_path = samples_dir / "Violins1_HarmonicSustain_BleedOrch_1-127_rr1_A4.wav";
+	auto file_path = samples_dir / "Violins1_HarmonicSustain_BleedOrch_1-127_rr1_A4.wav";
 
-	auto container = Parser::parse_file(file_path);
+	auto container = Parser::parse_file(file_path.string());
 	auto& wav = require_wav(*container);
 	print_info(wav);
 	Generator::write_file(*container, (project_dir / "out.wav").string());
 
-	std::string output_path = (project_dir / "out.json").string();
-	Generator::dump_json(wav, output_path);
+	auto output_path = project_dir / "out.json";
+	Generator::dump_json(wav, output_path.string());
 
 }
 
