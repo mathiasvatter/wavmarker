@@ -9,10 +9,10 @@
 #include <string>
 #include <vector>
 
-#include "FileStream.h"
-#include "nodes/Container.h"
-#include "nodes/wavmarker/WavFile.h"
-#include "util/StringUtils.h"
+#include "../util/FileStream.h"
+#include "Container.h"
+#include "wavmarker/WavFile.h"
+#include "../util/StringUtils.h"
 
 class Parser {
 public:

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nodes/Reflection.h"
+#include "src/Reflection.h"
 
 class FileInputStream;
 class FileOutputStream;

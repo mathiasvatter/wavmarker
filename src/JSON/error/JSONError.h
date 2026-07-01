@@ -5,7 +5,7 @@
 #include <sstream> // Required for formatting the error message in what()
 #include <utility>
 
-#include "nodes/JSON/parser/JSONTokens.h"
+#include "src/JSON/parser/JSONTokens.h"
 
 // Lightweight ParseError for the JSON module
 class JSONParseError final : public std::exception {

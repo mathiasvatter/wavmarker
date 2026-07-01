@@ -5,11 +5,11 @@
 #include <string>
 #include <typeinfo>
 
-#include "Generator.h"
-#include "Parser.h"
-#include "nodes/JSON/parser/JSONParser.h"
-#include "nodes/wavmarker/Patcher.h"
-#include "nodes/wavmarker/WavFile.h"
+#include "src/Generator.h"
+#include "src/Parser.h"
+#include "src/JSON/parser/JSONParser.h"
+#include "src/wavmarker/Patcher.h"
+#include "src/wavmarker/WavFile.h"
 #include "util/Error.h"
 #include "version.h"
 

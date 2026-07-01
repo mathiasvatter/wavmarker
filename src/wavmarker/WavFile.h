@@ -10,8 +10,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "nodes/Container.h"
-#include "nodes/Reflection.h"
+#include "src/Container.h"
+#include "src/Reflection.h"
 #include "ChunkKind.h"
 
 class FileInputStream;

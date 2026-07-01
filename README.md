@@ -1,23 +1,27 @@
 # wavmarker
 
+[![Release](https://img.shields.io/github/v/release/mathiasvatter/wavmarker)](https://github.com/mathiasvatter/wavmarker/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/mathiasvatter/wavmarker/build-and-release.yml)](https://github.com/mathiasvatter/wavmarker/actions)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
+[![Downloads](https://img.shields.io/github/downloads/mathiasvatter/wavmarker/total)](https://github.com/mathiasvatter/wavmarker/releases)
+
 Small C++20/CMake utility for parsing WAV files into structs and writing them back.
 
 ## Build
 
 ```sh
-cmake -S . -B build
-cmake --build build
+./build.sh release
 ```
 
 ## Usage
 
 ```sh
-./build/wavmarker --info input.wav
-./build/wavmarker input.wav output.wav
-./build/wavmarker --set 'bext.originator="Sonuscore"' input.wav
-./build/wavmarker --get bext.originator input.wav
-./build/wavmarker --copy-sample-loops source.wav target.wav
-./build/wavmarker --copy-sample-loops source.wav target.wav --no-labels
+./wavmarker --info input.wav
+./wavmarker input.wav output.wav
+./wavmarker --set 'bext.originator="WAVMARKER"' input.wav
+./wavmarker --get bext.originator input.wav
+./wavmarker --copy-sample-loops source.wav target.wav
+./wavmarker --copy-sample-loops source.wav target.wav --no-labels
 ```
 
 `--copy-sample-loops` replaces the sample loops in `target.wav` with those from
@@ -30,7 +34,7 @@ prints the field as JSON. The `bext.` prefix is optional, so this shell-friendly
 form is supported as well:
 
 ```sh
-./build/wavmarker --set "originator"="Sonuscore" input.wav
+./wavmarker --set "originator"="WAVMARKER" input.wav
 ```
 
 Currently modeled chunks:
