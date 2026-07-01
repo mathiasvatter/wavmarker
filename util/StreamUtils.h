@@ -189,6 +189,24 @@ namespace StreamUtils {
 		write_from(out, data.data(), data.size(), "write_bytes");
 	}
 
+	/**
+	 * Writes exactly field_size bytes without allocating a temporary padded vector.
+	 * Input longer than the field is truncated; shorter input is padded with zeroes.
+	 */
+	static void write_padded_bytes(FileOutputStream& out, const std::vector<uint8_t>& data,
+		const size_t field_size, const char* ctx) {
+		const size_t bytes_to_write = std::min(data.size(), field_size);
+		write_from(out, data.data(), bytes_to_write, ctx);
+
+		std::array<uint8_t, 256> padding{};
+		size_t remaining = field_size - bytes_to_write;
+		while (remaining > 0) {
+			const size_t block_size = std::min(remaining, padding.size());
+			write_from(out, padding.data(), block_size, ctx);
+			remaining -= block_size;
+		}
+	}
+
 	// writes num_bits of value in be or le (faster: build buffer + one write)
 	static void write_unsigned_bits(FileOutputStream& out, uint64_t value, int num_bits, bool is_big_endian) {
 		const int num_bytes_to_write = num_bits / 8;

@@ -5,10 +5,10 @@
 
 constexpr bool kLittleEndian = false;
 
-std::vector<uint8_t> write_to_bytes(const auto& value, FileOutputStream& parent_stream) {
-	FileOutputSubStream out(parent_stream);
-	value.write(out);
-	return out.data();
+void check_for_numeric_limits(const ChunkKind kind, size_t size, FileOutputStream& out, const std::string& id) {
+	if (size > std::numeric_limits<uint32_t>::max()) {
+		throw WriteError(get_chunk_kind_string(kind) + "chunk payload exceeds uint32 size field.", out, id);
+	}
 }
 
 std::unique_ptr<JSONValue> byte_preview_to_json(const std::vector<uint8_t>& bytes, const size_t max_size = 32) {
@@ -32,9 +32,7 @@ Chunk::Chunk(const ChunkKind kind, std::string id)
 void Chunk::write_chunk(FileOutputStream& out, const std::vector<uint8_t>& payload) const {
 	StreamUtils::write_ascii(out, id, 4);
 
-	if (payload.size() > std::numeric_limits<uint32_t>::max()) {
-		throw WriteError("WAV chunk payload exceeds uint32 size field.", out, id);
-	}
+	check_for_numeric_limits(kind, payload.size(), out, id);
 
 	StreamUtils::write_unsigned32(out, static_cast<uint32_t>(payload.size()), kLittleEndian);
 	StreamUtils::write_bytes(out, payload);
@@ -143,6 +141,12 @@ void CuePoint::write(FileOutputStream& out) const {
 	StreamUtils::write_unsigned32(out, sample_offset, kLittleEndian);
 }
 
+CuePoint CuePoint::with_id(const uint32_t new_id) const {
+	auto copy = *this;
+	copy.id = new_id;
+	return copy;
+}
+
 void Label::parse(FileInputStream& in) {
 	cue_id = StreamUtils::read_unsigned32(in, kLittleEndian);
 	text = StreamUtils::read_remaining_ascii_until_null(in);
@@ -152,6 +156,12 @@ void Label::write(FileOutputStream& out) const {
 	StreamUtils::write_unsigned32(out, cue_id, kLittleEndian);
 	StreamUtils::write_from(out, text.data(), text.size(), "Writing labl text");
 	out.put('\0');
+}
+
+Label Label::with_cue_id(const uint32_t new_cue_id) const {
+	auto copy = *this;
+	copy.cue_id = new_cue_id;
+	return copy;
 }
 
 void ListSubChunk::parse(FileInputStream& in, const std::string& list_type) {
@@ -174,17 +184,21 @@ void ListSubChunk::parse(FileInputStream& in, const std::string& list_type) {
 void ListSubChunk::write(FileOutputStream& out) const {
 	StreamUtils::write_ascii(out, id, 4);
 
-	std::vector<uint8_t> bytes;
 	if (label) {
-		bytes = write_to_bytes(*label, out);
+		const size_t payload_size = 4 + label->text.size() + 1;
+		check_for_numeric_limits(ChunkKind::List, payload.size(), out, id);
+		StreamUtils::write_unsigned32(out, payload_size, kLittleEndian);
+		label->write(out);
+		if ((payload_size & 1u) != 0u) {
+			out.put('\0');
+		}
 	} else {
-		bytes = payload;
-	}
-
-	StreamUtils::write_unsigned32(out, static_cast<uint32_t>(bytes.size()), kLittleEndian);
-	StreamUtils::write_bytes(out, bytes);
-	if ((bytes.size() & 1u) != 0u) {
-		out.put('\0');
+		check_for_numeric_limits(ChunkKind::List, payload.size(), out, id);
+		StreamUtils::write_unsigned32(out, static_cast<uint32_t>(payload.size()), kLittleEndian);
+		StreamUtils::write_bytes(out, payload);
+		if ((payload.size() & 1u) != 0u) {
+			out.put('\0');
+		}
 	}
 }
 
@@ -196,6 +210,30 @@ std::unique_ptr<JSONValue> ListSubChunk::to_json() const {
 }
 
 ListChunk::ListChunk() : Chunk(ChunkKind::List) {}
+
+std::vector<Label> ListChunk::labels_for_cue_ids(const std::unordered_set<uint32_t>& ids) const {
+	std::vector<Label> labels;
+	if (type != "adtl") {
+		return labels;
+	}
+	for (const auto& subchunk : subchunks) {
+		if (subchunk.id == "labl" && subchunk.label && ids.contains(subchunk.label->cue_id)) {
+			labels.push_back(*subchunk.label);
+		}
+	}
+	return labels;
+}
+
+void ListChunk::append_remapped_labels(const std::vector<Label>& labels,
+	const CueIdMap& cue_id_map) {
+	type = "adtl";
+	for (const auto& label : labels) {
+		ListSubChunk subchunk;
+		subchunk.id = "labl";
+		subchunk.label = label.with_cue_id(cue_id_map.at(label.cue_id));
+		subchunks.push_back(std::move(subchunk));
+	}
+}
 
 void ListChunk::parse(FileInputStream& in) {
 	if (in.remaining_bytes() < 4) {
@@ -271,7 +309,39 @@ void SampleLoop::write(FileOutputStream& out) const {
 	StreamUtils::write_unsigned32(out, play_count, kLittleEndian);
 }
 
+void SampleLoop::remap_cue_id(const CueIdMap& cue_id_map) {
+	cue_point_id = cue_id_map.at(cue_point_id);
+}
+
 SamplerChunk::SamplerChunk() : Chunk(ChunkKind::Sampler) {}
+
+std::vector<uint32_t> SamplerChunk::loop_cue_ids_in_order() const {
+	std::vector<uint32_t> ids;
+	std::unordered_set<uint32_t> seen;
+	// Cue points are emitted in the order in which loops first reference them.
+	for (const auto& loop : loops) {
+		if (seen.insert(loop.cue_point_id).second) {
+			ids.push_back(loop.cue_point_id);
+		}
+	}
+	return ids;
+}
+
+void SamplerChunk::validate_loop_cues(const CueChunk& cue_chunk) const {
+	for (const uint32_t cue_id : loop_cue_ids_in_order()) {
+		if (!cue_chunk.cue_point_map.contains(cue_id)) {
+			throw RuntimeError("Source sample loop references a missing cue point id: " + std::to_string(cue_id),
+				"Copying sample loops");
+		}
+	}
+}
+
+void SamplerChunk::copy_from(const SamplerChunk& source, const CueIdMap& cue_id_map) {
+	*this = source;
+	for (auto& loop : loops) {
+		loop.remap_cue_id(cue_id_map);
+	}
+}
 
 void SamplerChunk::parse(FileInputStream& in) {
 	if (in.remaining_bytes() < 36) {
@@ -362,9 +432,7 @@ void BextChunk::write(FileOutputStream& out) const {
 	StreamUtils::write_unsigned64(payload, time_reference, kLittleEndian);
 	StreamUtils::write_unsigned16(payload, version, kLittleEndian);
 
-	std::vector<uint8_t> fixed_umid = umid;
-	fixed_umid.resize(64);
-	StreamUtils::write_bytes(payload, fixed_umid);
+	StreamUtils::write_padded_bytes(payload, umid, 64, "Writing bext UMID");
 
 	StreamUtils::write_unsigned16(payload, loudness_value, kLittleEndian);
 	StreamUtils::write_unsigned16(payload, loudness_range, kLittleEndian);
@@ -372,9 +440,7 @@ void BextChunk::write(FileOutputStream& out) const {
 	StreamUtils::write_unsigned16(payload, max_momentary_loudness, kLittleEndian);
 	StreamUtils::write_unsigned16(payload, max_short_term_loudness, kLittleEndian);
 
-	std::vector<uint8_t> fixed_reserved = reserved;
-	fixed_reserved.resize(180);
-	StreamUtils::write_bytes(payload, fixed_reserved);
+	StreamUtils::write_padded_bytes(payload, reserved, 180, "Writing bext reserved field");
 
 	StreamUtils::write_from(payload, coding_history.data(), coding_history.size(), "Writing bext coding history");
 	write_chunk(out, payload.data());
@@ -415,6 +481,31 @@ std::unique_ptr<JSONValue> BextChunk::to_json() const {
 }
 
 CueChunk::CueChunk() : Chunk(ChunkKind::Cue) {}
+
+CueIdMap CueChunk::create_cue_id_map(const std::vector<uint32_t>& source_ids) const {
+	uint32_t max_id = 0;
+	for (const auto& cue_point : cue_points) {
+		max_id = std::max(max_id, cue_point.id);
+	}
+
+	CueIdMap cue_id_map;
+	uint32_t next_id = max_id + 1;
+	for (const uint32_t source_id : source_ids) {
+		// Wrapping to zero means max_id was UINT32_MAX or all remaining ids were consumed.
+		if (next_id == 0) {
+			throw RuntimeError("Cue point id overflow while copying sample loops.", "Copying sample loops");
+		}
+		cue_id_map.emplace(source_id, next_id++);
+	}
+	return cue_id_map;
+}
+
+void CueChunk::append_remapped_cues(const CueChunk& source, const std::vector<uint32_t>& source_ids, const CueIdMap& cue_id_map) {
+	for (const uint32_t source_id : source_ids) {
+		cue_points.push_back(source.cue_point_map.at(source_id)->with_id(cue_id_map.at(source_id)));
+	}
+	rebuild_cue_point_map();
+}
 
 void CueChunk::parse(FileInputStream& in) {
 	const uint32_t count = StreamUtils::read_unsigned32(in, kLittleEndian);
@@ -584,108 +675,84 @@ std::vector<SampleLoop> WavFile::sample_loops() const {
 	return out;
 }
 
-WavFile::SampleLoopCueReferences WavFile::validate_sample_loop_cues() const {
-	SampleLoopCueReferences references;
+std::vector<Label> WavFile::labels_for_cue_ids(const std::unordered_set<uint32_t>& ids) const {
+	std::vector<Label> labels;
+	for (const auto& chunk : m_chunks) {
+		const auto* list_chunk = dynamic_cast<const ListChunk*>(chunk.get());
+		if (!list_chunk) {
+			continue;
+		}
+		auto matching_labels = list_chunk->labels_for_cue_ids(ids);
+		labels.insert(labels.end(), matching_labels.begin(), matching_labels.end());
+	}
+	return labels;
+}
 
-	references.sampler_chunk = find_chunk_as<SamplerChunk>(ChunkKind::Sampler);
-	if (!references.sampler_chunk || references.sampler_chunk->loops.empty()) {
-		throw RuntimeError("Source WAV does not contain sample loops.", "Copying sample loops");
+void WavFile::remove_cues_and_labels(const std::unordered_set<uint32_t>& cue_ids) {
+	if (auto* cue_chunk = find_chunk_as<CueChunk>(ChunkKind::Cue)) {
+		cue_chunk->remove_cues_by_id(cue_ids);
+	}
+	for (auto& chunk : m_chunks) {
+		auto* list_chunk = dynamic_cast<ListChunk*>(chunk.get());
+		if (list_chunk && list_chunk->type == "adtl") {
+			list_chunk->remove_labels_by_cue_id(cue_ids);
+		}
+	}
+}
+
+ListChunk& WavFile::ensure_adtl_chunk() {
+	for (auto& chunk : m_chunks) {
+		auto* list_chunk = dynamic_cast<ListChunk*>(chunk.get());
+		if (list_chunk && list_chunk->type == "adtl") {
+			return *list_chunk;
+		}
 	}
 
-	references.cue_chunk = find_chunk_as<CueChunk>(ChunkKind::Cue);
-	if (!references.cue_chunk) {
+	auto list_chunk = std::make_unique<ListChunk>();
+	list_chunk->type = "adtl";
+	auto* result = list_chunk.get();
+	m_chunks.push_back(std::move(list_chunk));
+	return *result;
+}
+
+void WavFile::copy_sample_loops_from(const WavFile& source, const bool include_labels) {
+	if (this == &source) {
+		return;
+	}
+
+	const auto* source_sampler = source.find_chunk_as<SamplerChunk>(ChunkKind::Sampler);
+	if (!source_sampler || source_sampler->loops.empty()) {
+		throw RuntimeError("Source WAV does not contain sample loops.", "Copying sample loops");
+	}
+	const auto* source_cues = source.find_chunk_as<CueChunk>(ChunkKind::Cue);
+	if (!source_cues) {
 		throw RuntimeError("Source WAV contains sample loops but no cue chunk.", "Copying sample loops");
 	}
 
-	for (const auto& loop : references.sampler_chunk->loops) {
-		if (references.cue_ids.insert(loop.cue_point_id).second) {
-			references.cue_ids_in_order.push_back(loop.cue_point_id);
-		}
-	}
+	source_sampler->validate_loop_cues(*source_cues);
+	const auto source_cue_ids = source_sampler->loop_cue_ids_in_order();
+	const auto source_labels = include_labels
+		? source.labels_for_cue_ids(source_sampler->cue_ids_for_loops())
+		: std::vector<Label>{};
 
-	for (const auto source_cue_id : references.cue_ids_in_order) {
-		if (!references.cue_chunk->cue_point_map.contains(source_cue_id)) {
-			throw RuntimeError("Source sample loop references a missing cue point id: " + std::to_string(source_cue_id),
-				"Copying sample loops");
-		}
-	}
-
-	return references;
-}
-
-void WavFile::copy_sample_loops_from(WavFile& source, const bool include_labels) {
-	const auto source_loop_cues = source.validate_sample_loop_cues();
-
-	std::vector<Label> source_labels;
-	if (include_labels) {
-		for (const auto& chunk : source.m_chunks) {
-			const auto* list_chunk = dynamic_cast<const ListChunk*>(chunk.get());
-			if (!list_chunk || list_chunk->type != "adtl") {
-				continue;
-			}
-			for (const auto& subchunk : list_chunk->subchunks) {
-				if (subchunk.id == "labl" && subchunk.label && source_loop_cues.cue_ids.contains(subchunk.label->cue_id)) {
-					source_labels.push_back(*subchunk.label);
-				}
-			}
-		}
-	}
-
-	std::unordered_set<uint32_t> old_target_loop_cue_ids;
+	// Remove only metadata owned by the loops being replaced. Other cues and labels survive.
 	if (const auto* target_sampler_chunk = this->find_chunk_as<SamplerChunk>(ChunkKind::Sampler)) {
-		old_target_loop_cue_ids = target_sampler_chunk->cue_ids_for_loops();
+		remove_cues_and_labels(target_sampler_chunk->cue_ids_for_loops());
 	}
 
-	if (!old_target_loop_cue_ids.empty()) {
-		if (auto* target_cue_chunk = this->find_chunk_as<CueChunk>(ChunkKind::Cue)) {
-			target_cue_chunk->remove_cues_by_id(old_target_loop_cue_ids);
-		}
-		for (auto& chunk : m_chunks) {
-			auto* list_chunk = dynamic_cast<ListChunk*>(chunk.get());
-			if (list_chunk && list_chunk->type == "adtl") {
-				list_chunk->remove_labels_by_cue_id(old_target_loop_cue_ids);
-			}
-		}
-	}
-
-	std::unordered_map<uint32_t, uint32_t> cue_id_map;
-	uint32_t next_cue_id = this->next_free_cue_id();
-	for (const auto source_cue_id : source_loop_cues.cue_ids_in_order) {
-		if (next_cue_id == 0) {
-			throw RuntimeError("Cue point id overflow while copying sample loops.", "Copying sample loops");
-		}
-		cue_id_map.emplace(source_cue_id, next_cue_id++);
-	}
-
+	// Allocate ids after removal so ids belonging exclusively to old loops do not affect the range.
 	auto& target_cue_chunk = this->ensure_chunk_as<CueChunk>(ChunkKind::Cue);
-	for (const auto source_cue_id : source_loop_cues.cue_ids_in_order) {
-		const auto target_cue_id = cue_id_map.at(source_cue_id);
-		auto cue_point = *source_loop_cues.cue_chunk->cue_point_map.at(source_cue_id);
-		cue_point.id = target_cue_id;
-		target_cue_chunk.cue_points.push_back(std::move(cue_point));
-	}
-	target_cue_chunk.rebuild_cue_point_map();
+	const auto cue_id_map = target_cue_chunk.create_cue_id_map(source_cue_ids);
+	target_cue_chunk.append_remapped_cues(*source_cues, source_cue_ids, cue_id_map);
 
 	auto& target_sampler_chunk = this->ensure_chunk_as<SamplerChunk>(ChunkKind::Sampler);
-	static_cast<SamplerChunk&>(target_sampler_chunk) = *source_loop_cues.sampler_chunk;
-	for (auto& loop : target_sampler_chunk.loops) {
-		loop.cue_point_id = cue_id_map.at(loop.cue_point_id);
-	}
+	target_sampler_chunk.copy_from(*source_sampler, cue_id_map);
 
 	if (!include_labels || source_labels.empty()) {
 		return;
 	}
 
-	auto& target_list_chunk = this->ensure_chunk_as<ListChunk>(ChunkKind::List);
-	target_list_chunk.type = "adtl";
-	for (auto label : source_labels) {
-		label.cue_id = cue_id_map.at(label.cue_id);
-
-		ListSubChunk subchunk;
-		subchunk.id = "labl";
-		subchunk.label = std::move(label);
-		target_list_chunk.subchunks.push_back(std::move(subchunk));
-	}
+	ensure_adtl_chunk().append_remapped_labels(source_labels, cue_id_map);
 }
 
 const std::vector<uint8_t>* WavFile::audio_data() const {

@@ -2,11 +2,11 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -16,6 +16,10 @@
 
 class FileInputStream;
 class FileOutputStream;
+struct CueChunk;
+
+/// Maps cue point ids from a source WAV to their ids in a destination WAV.
+using CueIdMap = std::unordered_map<uint32_t, uint32_t>;
 
 struct Chunk : Reflectable {
 	std::string id;
@@ -91,6 +95,8 @@ struct CuePoint : Reflectable {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	/// Returns a copy of this cue point with a different id.
+	[[nodiscard]] CuePoint with_id(uint32_t new_id) const;
 	DECLARE_REFLECTABLE()
 };
 DEFINE_REFLECTABLE_MEMBERS(CuePoint, id, position, data_chunk_id, chunk_start, block_start, sample_offset)
@@ -101,6 +107,8 @@ struct Label : Reflectable {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	/// Returns a copy of this label referencing a different cue point.
+	[[nodiscard]] Label with_cue_id(uint32_t new_cue_id) const;
 	DECLARE_REFLECTABLE()
 };
 DEFINE_REFLECTABLE_MEMBERS(Label, cue_id, text)
@@ -124,11 +132,16 @@ struct ListChunk final : Chunk {
 
 	ListChunk();
 
+	/// Removes label subchunks that reference one of the supplied cue point ids.
 	void remove_labels_by_cue_id(const std::unordered_set<uint32_t>& ids) {
 		std::erase_if(subchunks, [&ids](const ListSubChunk& subchunk) {
 			return subchunk.label && ids.contains(subchunk.label->cue_id);
 		});
 	}
+	/// Returns labels for the supplied cue ids. Non-adtl LIST chunks return no labels.
+	[[nodiscard]] std::vector<Label> labels_for_cue_ids(const std::unordered_set<uint32_t>& ids) const;
+	/// Appends labels after replacing their source cue ids according to cue_id_map.
+	void append_remapped_labels(const std::vector<Label>& labels, const CueIdMap& cue_id_map);
 
 	void parse(FileInputStream& in) override;
 	void write(FileOutputStream& out) const override;
@@ -148,6 +161,8 @@ struct SampleLoop : Reflectable {
 
 	void parse(FileInputStream& in);
 	void write(FileOutputStream& out) const;
+	/// Replaces cue_point_id with its destination id. Throws if no mapping exists.
+	void remap_cue_id(const CueIdMap& cue_id_map);
 	DECLARE_REFLECTABLE()
 };
 DEFINE_REFLECTABLE_MEMBERS(SampleLoop, cue_point_id, type, start, end, fraction, play_count)
@@ -166,6 +181,7 @@ struct SamplerChunk final : Chunk {
 
 	SamplerChunk();
 
+	/// Returns the distinct cue point ids referenced by the sample loops.
 	std::unordered_set<uint32_t> cue_ids_for_loops() const {
 		std::unordered_set<uint32_t> ids;
 		for (const auto& loop : loops) {
@@ -173,6 +189,12 @@ struct SamplerChunk final : Chunk {
 		}
 		return ids;
 	}
+	/// Returns distinct loop cue ids while preserving their first occurrence order.
+	[[nodiscard]] std::vector<uint32_t> loop_cue_ids_in_order() const;
+	/// Verifies that every loop references a cue point contained in cue_chunk.
+	void validate_loop_cues(const CueChunk& cue_chunk) const;
+	/// Copies all sampler data from source and remaps every loop cue reference.
+	void copy_from(const SamplerChunk& source, const CueIdMap& cue_id_map);
 
 	void parse(FileInputStream& in) override;
 	void write(FileOutputStream& out) const override;
@@ -215,6 +237,7 @@ struct CueChunk final : Chunk {
 
 	CueChunk();
 
+	/// Rebuilds the non-owning id lookup after cue_points has changed.
 	void rebuild_cue_point_map() {
 		cue_point_map.clear();
 		for (auto& cue_point : cue_points) {
@@ -222,12 +245,22 @@ struct CueChunk final : Chunk {
 		}
 	}
 
+	/// Removes cue points with a matching id and refreshes the lookup map.
 	void remove_cues_by_id(const std::unordered_set<uint32_t>& ids) {
 		std::erase_if(cue_points, [&ids](const CuePoint& cue_point) {
 			return ids.contains(cue_point.id);
 		});
 		rebuild_cue_point_map();
 	}
+	/**
+	 * Assigns consecutive, currently unused destination ids to source_ids.
+	 *
+	 * @throws RuntimeError if the uint32 id space is exhausted.
+	 */
+	[[nodiscard]] CueIdMap create_cue_id_map(const std::vector<uint32_t>& source_ids) const;
+	/// Copies the selected cue points from source, applies cue_id_map, and refreshes the lookup map.
+	void append_remapped_cues(const CueChunk& source, const std::vector<uint32_t>& source_ids,
+		const CueIdMap& cue_id_map);
 
 	void parse(FileInputStream& in) override;
 	void write(FileOutputStream& out) const override;
@@ -239,18 +272,9 @@ DEFINE_REFLECTABLE_MEMBERS(CueChunk, cue_points)
 
 
 class WavFile final : public Container {
-	struct SampleLoopCueReferences {
-		const SamplerChunk* sampler_chunk = nullptr;
-		const CueChunk* cue_chunk = nullptr;
-		std::vector<uint32_t> cue_ids_in_order;
-		std::unordered_set<uint32_t> cue_ids;
-	};
-
 	std::string m_riff_id = "RIFF";
 	std::string m_wave_id = "WAVE";
 	std::vector<std::unique_ptr<Chunk>> m_chunks;
-
-	[[nodiscard]] SampleLoopCueReferences validate_sample_loop_cues() const;
 
 public:
 	void parse(FileInputStream& in) override;
@@ -266,7 +290,17 @@ public:
 	[[nodiscard]] std::vector<Label> labels() const;
 	[[nodiscard]] std::vector<SampleLoop> sample_loops() const;
 	[[nodiscard]] const std::vector<uint8_t>* audio_data() const;
-	void copy_sample_loops_from(WavFile& source, bool include_labels = true);
+	/**
+	 * Replaces this WAV's sample loops and their cue points with those from source.
+	 * Existing cues and labels belonging to the replaced loops are removed; unrelated
+	 * metadata remains intact. Source cue ids are remapped to unused destination ids.
+	 *
+	 * @param source WAV providing the sampler, cue, and optional label data.
+	 * @param include_labels Whether labels belonging to the source loops are copied.
+	 * @throws RuntimeError if source has no loops, lacks a cue chunk, references a
+	 *         missing cue point, or the destination cue id space is exhausted.
+	 */
+	void copy_sample_loops_from(const WavFile& source, bool include_labels = true);
 
 	Chunk* find_chunk(const ChunkKind kind) noexcept {
 		const auto it = std::ranges::find_if(m_chunks, [kind](const std::unique_ptr<Chunk>& chunk) {
@@ -292,7 +326,7 @@ public:
 		return dynamic_cast<const T*>(find_chunk(kind));
 	}
 
-	/// returns chunk, tries to find it, if not, creates it
+	/// Returns the requested chunk, creating and appending it when absent.
 	Chunk& ensure_chunk(const ChunkKind kind) noexcept {
 		if (auto* chunk = find_chunk(kind)) {
 			return *chunk;
@@ -307,24 +341,15 @@ public:
 		return static_cast<T&>(ensure_chunk(kind));
 	}
 
-	[[nodiscard]] uint32_t next_free_cue_id() const {
-		uint32_t max_id = 0;
-		for (const auto& chunk : m_chunks) {
-			const auto* cue_chunk = dynamic_cast<const CueChunk*>(chunk.get());
-			if (!cue_chunk) continue;
-			for (const auto& cue_point : cue_chunk->cue_points) {
-				max_id = std::max(max_id, cue_point.id);
-			}
-		}
-		if (max_id == std::numeric_limits<uint32_t>::max()) {
-			throw RuntimeError("No free cue point ids left.", "Copying sample loops");
-		}
-		return max_id + 1;
-	}
-
 	DECLARE_REFLECTABLE()
 
 private:
+	/// Collects matching labels from all adtl LIST chunks.
+	[[nodiscard]] std::vector<Label> labels_for_cue_ids(const std::unordered_set<uint32_t>& ids) const;
+	/// Removes cue points and adtl labels associated with the supplied ids.
+	void remove_cues_and_labels(const std::unordered_set<uint32_t>& cue_ids);
+	/// Returns the existing adtl LIST chunk or appends a new one.
+	ListChunk& ensure_adtl_chunk();
 	static std::unique_ptr<Chunk> create_empty_chunk(ChunkKind kind);
 	static std::unique_ptr<Chunk> parse_chunk(FileInputStream& in);
 };
