@@ -147,7 +147,7 @@ inline void add_options(CliApp::CliParser& parser) {
 	});
 
 	parser.add_option({
-		"", "--copy-markers", "Copy wav markers (cue points) from the source WAV into the input WAV.", "<source.wav>",
+		"", "--copy-markers", "Copy wav markers (cue points, smpl loops and labels) from the source WAV into the input WAV.", "<source.wav>",
 		[&parser, include_labels](const std::string&, const std::optional<std::string>& value) {
 			parser.add_command(CliApp::Command(
 				[source_path = *value, include_labels](Container& container) {
