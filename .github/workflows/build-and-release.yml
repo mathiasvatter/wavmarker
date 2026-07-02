@@ -1,9 +1,9 @@
 name: Build and Release
 
 on:
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -63,18 +63,56 @@ jobs:
         run: |
           chmod +x release-assets/macos-arm64/wavmarker
           chmod +x release-assets/macos-x86_64/wavmarker
+          tar -czf release-assets/wavmarker-macos-arm64.tar.gz -C release-assets/macos-arm64 wavmarker
+          tar -czf release-assets/wavmarker-macos-x86_64.tar.gz -C release-assets/macos-x86_64 wavmarker
 
       - name: Upload macOS arm64 artifact
         uses: actions/upload-artifact@v7
         with:
           name: wavmarker-macos-arm64
-          path: release-assets/macos-arm64/wavmarker
+          path: release-assets/wavmarker-macos-arm64.tar.gz
 
       - name: Upload macOS x86_64 artifact
         uses: actions/upload-artifact@v7
         with:
           name: wavmarker-macos-x86_64
-          path: release-assets/macos-x86_64/wavmarker
+          path: release-assets/wavmarker-macos-x86_64.tar.gz
+
+  build-linux:
+    name: Build Linux (x86_64)
+    # Build on an older glibc baseline so the binary also runs on newer distributions.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: "3.30.5"
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build Linux (build.sh)
+        run: |
+          chmod +x build.sh
+          export CI=true
+          ./build.sh release
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p release-assets/linux-x86_64
+          cp cmake-build-release/wavmarker release-assets/linux-x86_64/wavmarker
+          chmod +x release-assets/linux-x86_64/wavmarker
+          tar -czf release-assets/wavmarker-linux-x86_64.tar.gz -C release-assets/linux-x86_64 wavmarker
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wavmarker-linux-x86_64
+          path: release-assets/wavmarker-linux-x86_64.tar.gz
 
   build-windows:
     name: Build Windows (x86_64 Clang)
@@ -109,21 +147,22 @@ jobs:
           build.bat release
 
       - name: Prepare artifact
-        shell: cmd
+        shell: pwsh
         run: |
-          if not exist release-assets\\windows-x86_64 mkdir release-assets\\windows-x86_64
-          copy /Y cmake-build-release\wavmarker.exe release-assets\\windows-x86_64\\wavmarker.exe
+          New-Item -ItemType Directory -Force -Path release-assets\windows-x86_64 | Out-Null
+          Copy-Item cmake-build-release\wavmarker.exe release-assets\windows-x86_64\wavmarker.exe
+          Compress-Archive -Path release-assets\windows-x86_64\wavmarker.exe -DestinationPath release-assets\wavmarker-windows-x86_64.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: wavmarker-windows-x86_64
-          path: release-assets/windows-x86_64/wavmarker.exe
+          path: release-assets/wavmarker-windows-x86_64.zip
 
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-linux, build-windows]
 
     steps:
       - name: Checkout
@@ -138,10 +177,12 @@ jobs:
       - name: Show downloaded assets
         run: find release-assets -maxdepth 3 -type f -print
 
-      - name: Fix macOS binary permissions
+      - name: Verify release assets
         run: |
-          chmod +x release-assets/wavmarker-macos-arm64/wavmarker
-          chmod +x release-assets/wavmarker-macos-x86_64/wavmarker
+          test -f release-assets/wavmarker-macos-arm64/wavmarker-macos-arm64.tar.gz
+          test -f release-assets/wavmarker-macos-x86_64/wavmarker-macos-x86_64.tar.gz
+          test -f release-assets/wavmarker-linux-x86_64/wavmarker-linux-x86_64.tar.gz
+          test -f release-assets/wavmarker-windows-x86_64/wavmarker-windows-x86_64.zip
 
       - name: Create/replace release
         env:
@@ -149,10 +190,10 @@ jobs:
           ASSETS_DIR: release-assets
           RELEASE_VERSION: ${{ needs.build-macos.outputs.release_version }}
         run: |
-          chmod +x set_release.sh
+          chmod +x scripts/set_release.sh
           if [[ -z "${RELEASE_VERSION}" ]]; then
             echo "Error: RELEASE_VERSION from build-macos output is empty." >&2
             exit 1
           fi
           echo "Using RELEASE_VERSION=${RELEASE_VERSION}"
-          ./set_release.sh
+          ./scripts/set_release.sh

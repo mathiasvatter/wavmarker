@@ -63,30 +63,9 @@ if [ -n "$ASSETS_DIR" ]; then
     exit 1
   fi
 
-  MACOS_ARM_SRC="$ASSETS_DIR/${BIN_NAME}-macos-arm64/${BIN_NAME}"
-  MACOS_X64_SRC="$ASSETS_DIR/${BIN_NAME}-macos-x86_64/${BIN_NAME}"
-  WINDOWS_SRC="$ASSETS_DIR/${BIN_NAME}-windows-x86_64/${BIN_NAME}.exe"
-
-  if [ -f "$MACOS_ARM_SRC" ] && [ -f "$MACOS_X64_SRC" ] && [ -f "$WINDOWS_SRC" ]; then
-    TMP_DIR="$(mktemp -d)"
-    BUNDLE_DIR_NAME="${BIN_NAME}_${TAG}"
-    BUNDLE_ROOT="$TMP_DIR/$BUNDLE_DIR_NAME"
-
-    mkdir -p "$BUNDLE_ROOT/macos_arm64" "$BUNDLE_ROOT/macos_x86_64" "$BUNDLE_ROOT/windows"
-    cp "$MACOS_ARM_SRC" "$BUNDLE_ROOT/macos_arm64/${BIN_NAME}"
-    cp "$MACOS_X64_SRC" "$BUNDLE_ROOT/macos_x86_64/${BIN_NAME}"
-    cp "$WINDOWS_SRC" "$BUNDLE_ROOT/windows/${BIN_NAME}.exe"
-    chmod +x "$BUNDLE_ROOT/macos_arm64/${BIN_NAME}" "$BUNDLE_ROOT/macos_x86_64/${BIN_NAME}"
-
-    BUNDLE_ZIP="$PWD/${BUNDLE_DIR_NAME}.zip"
-    (cd "$TMP_DIR" && zip -qry "$BUNDLE_ZIP" "$BUNDLE_DIR_NAME")
-
-    ASSETS+=("$BUNDLE_ZIP")
-  else
-    while IFS= read -r -d '' file; do
-      ASSETS+=("$file")
-    done < <(find "$ASSETS_DIR" -type f -print0 | sort -z)
-  fi
+  while IFS= read -r -d '' file; do
+    ASSETS+=("$file")
+  done < <(find "$ASSETS_DIR" -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 | sort -z)
 else
   if [ ! -f "$BIN_PATH" ]; then
     echo "Error: ${BIN_NAME} executable not found in ${BUILD_DIR}." >&2

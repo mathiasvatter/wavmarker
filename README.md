@@ -20,14 +20,17 @@ Small C++20/CMake utility for parsing WAV files into structs and writing them ba
 ./wavmarker input.wav output.wav
 ./wavmarker --set 'bext.originator="WAVMARKER"' input.wav
 ./wavmarker --get bext.originator input.wav
-./wavmarker --copy-sample-loops source.wav target.wav
-./wavmarker --copy-sample-loops source.wav target.wav --no-labels
+./wavmarker --copy-markers source.wav target.wav
+./wavmarker --copy-markers source.wav target.wav --no-labels
+./wavmarker --remove-markers input.wav
 ```
 
-`--copy-sample-loops` replaces the sample loops in `target.wav` with those from
-`source.wav` and overwrites `target.wav` in place. Labels belonging to the loops
-are copied by default; `--no-labels` disables label copying. Other target audio and
-metadata remain unchanged.
+`--copy-markers` replaces the cue markers in `target.wav` with those from
+`source.wav` and overwrites `target.wav` in place. Labels are copied by default;
+`--no-labels` disables label copying. `--remove-markers` removes all cue markers,
+their labels, and all sampler loops. If the source contains a `smpl` chunk, its sampler loop data is
+copied too. Without a source `smpl` chunk, existing target loops remain unchanged.
+Audio and other metadata remain unchanged.
 
 `--set` modifies a BEXT field and overwrites the input WAV in place. `--get`
 prints the field as JSON. The `bext.` prefix is optional, so this shell-friendly

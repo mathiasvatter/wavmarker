@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.30)
-project(wavmarker VERSION 0.0.1)
+project(wavmarker VERSION 0.0.2)
 
 set(PRE_RELEASE_VERSION "" CACHE STRING "Optional prerelease suffix, e.g. -beta1")
 
@@ -37,7 +37,9 @@ add_executable(wavmarker
         util/StringUtils.h
         src/wavmarker/ChunkKind.h
         src/wavmarker/Patcher.h
-        src/CliApplication.h
+        src/cli/CliApplication.h
+        src/cli/CliApplication.cpp
+        src/cli/CliHandling.h
 )
 
 target_include_directories(wavmarker
