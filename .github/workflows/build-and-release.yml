@@ -190,10 +190,10 @@ jobs:
           ASSETS_DIR: release-assets
           RELEASE_VERSION: ${{ needs.build-macos.outputs.release_version }}
         run: |
-          chmod +x set_release.sh
+          chmod +x scripts/set_release.sh
           if [[ -z "${RELEASE_VERSION}" ]]; then
             echo "Error: RELEASE_VERSION from build-macos output is empty." >&2
             exit 1
           fi
           echo "Using RELEASE_VERSION=${RELEASE_VERSION}"
-          ./set_release.sh
+          ./scripts/set_release.sh

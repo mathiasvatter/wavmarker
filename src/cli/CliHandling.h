@@ -5,9 +5,9 @@
 #pragma once
 
 #include "CliApplication.h"
-#include "wavmarker/Patcher.h"
-#include "wavmarker/WavFile.h"
-#include "JSON/parser/JSONParser.h"
+#include "../wavmarker/Patcher.h"
+#include "../wavmarker/WavFile.h"
+#include "../JSON/parser/JSONParser.h"
 #include "src/Generator.h"
 #include "src/Parser.h"
 
@@ -88,9 +88,22 @@ inline void copy_markers(Container& target_container, const std::string& source_
 	auto source_container = Parser::parse_file(source_path);
 	auto& source = require_wav(*source_container);
 	auto& target = require_wav(target_container);
-	target.copy_sample_loops_from(source, include_labels);
-	std::cout << "Copied " << target.sample_loops().size() << " sample loop(s) from "
-		<< source_path << '\n';
+	target.copy_markers_from(source, include_labels);
+	std::cout << "Copied " << target.cue_points().size() << " marker(s) from "
+		<< source_path;
+	if (include_labels) {
+		std::cout << " with " << target.labels().size() << " label(s)";
+	}
+	std::cout << '\n';
+}
+
+inline void remove_markers(Container& container) {
+	auto& wav = require_wav(container);
+	const auto marker_count = wav.cue_points().size();
+	const auto loop_count = wav.sample_loops().size();
+	wav.remove_markers();
+	std::cout << "Removed " << marker_count << " marker(s) and "
+		<< loop_count << " sample loop(s)\n";
 }
 
 /// add main cli options
@@ -148,6 +161,16 @@ inline void add_options(CliApp::CliParser& parser) {
 		"", "--no-labels", "Do not copy labels with --copy-markers.", "",
 		[include_labels](const std::string&, const std::optional<std::string>&) {
 			*include_labels = false;
+			return true;
+		}
+	});
+
+	parser.add_option({
+		"", "--remove-markers", "Remove all cue markers, labels, and sample loops.", "",
+		[&parser](const std::string&, const std::optional<std::string>&) {
+			parser.add_command(CliApp::Command([](Container& container) {
+				remove_markers(container);
+			}, true));
 			return true;
 		}
 	});

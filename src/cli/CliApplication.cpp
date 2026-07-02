@@ -162,7 +162,8 @@ void CliParser::print_usage() const {
 		<< "  " << m_program_name << " input.wav output.wav\n"
 		<< "  " << m_program_name << " --set 'bext.originator=\"WAVMARKER\"' input.wav\n"
 		<< "  " << m_program_name << " --get bext.originator input.wav\n"
-		<< "  " << m_program_name << " --copy-markers source.wav target.wav --no-labels\n";
+		<< "  " << m_program_name << " --copy-markers source.wav target.wav --no-labels\n"
+		<< "  " << m_program_name << " --remove-markers input.wav\n";
 }
 
 void CliParser::print_version() {

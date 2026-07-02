@@ -5,7 +5,7 @@
 #include <string>
 #include <typeinfo>
 
-#include "src/CliHandling.h"
+#include "src/cli/CliHandling.h"
 #include "src/wavmarker/Patcher.h"
 #include "src/wavmarker/WavFile.h"
 #include "util/Error.h"
