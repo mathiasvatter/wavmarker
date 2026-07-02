@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.30)
-project(wavmarker VERSION 0.0.1)
+project(wavmarker VERSION 0.0.2)
 
 set(PRE_RELEASE_VERSION "" CACHE STRING "Optional prerelease suffix, e.g. -beta1")
 
